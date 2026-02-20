@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 
+from airflow.models.param import Param
 from airflow.sdk import DAG
-from airflow.providers.standard.operators.bash  import BashOperator
+from airflow.providers.standard.operators.bash import BashOperator
 
 default_args = {
     'owner': 'airflow',
@@ -19,11 +20,18 @@ with DAG(
         start_date=datetime(2026, 1, 1),
         catchup=False,
         tags=['sample', 'bash'],
+        params={
+            'message': Param(
+                default='Hello World!',
+                type='string',
+                description='Text to be printed by the workflow',
+            ),
+        },
 ) as dag:
 
     hello_world_task = BashOperator(
         task_id='say_hello',
-        bash_command='echo "Hello World!"',
+        bash_command='echo "{{ params.message }}"',
     )
 
     hello_world_task
