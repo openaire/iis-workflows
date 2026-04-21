@@ -93,10 +93,10 @@ def citation_matching_direct():
             image="{{ params.get('SPARK_IMAGE') }}",
             main_class="eu.dnetlib.iis.wf.citationmatching.direct.CitationMatchingDirectJob",
             arguments=[
-                "--inputAvroPath", "{{ params.get('input') }}",
-                "--inputPmcIdsMappingCSV", "{{ params.get('inputPmcIdsMappingCSV') }}",
-                "--outputAvroPath", "{{ params.get('output') }}",
-                "--outputReportPath", "{{ params.get('output_report_root_path') }}"               
+                "-inputAvroPath", "{{ params.get('input') }}",
+                "-inputPmcIdsMappingCSV", "{{ params.get('inputPmcIdsMappingCSV') }}",
+                "-outputAvroPath", "{{ params.get('output') }}",
+                "-outputReportPath", "{{ params.get('output_report_root_path') }}"               
             ],
             spark_extra_conf={
                 "spark.executor.memory": "{{ params.get('sparkExecutorMemory') }}",
