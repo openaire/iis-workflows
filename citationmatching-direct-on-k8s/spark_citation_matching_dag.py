@@ -34,6 +34,14 @@ default_args = {
             type='string',
             description="citation matching shaded jar"
         ),
+        "SPARK_IMAGE": Param(
+            "docker-registry.openaire.eu/kubernetes_devel/spark:4.1.1",
+            type='string',
+            description=""),
+        "HADOOP_USER_NAME": Param(
+            "marek.horst",
+            type='string',
+            description=""),
         # --- I/O paths (most commonly overridden) ---
         "input": Param(
             default="hdfs://nameservice1/user/dnet.production/iis/working_dirs/primary/transformers_metadatamerger/output_merged_metadata",
@@ -82,16 +90,23 @@ def citation_matching_direct():
             task_id="citation_matching_direct",
             task_display_name="Perform citation matching direct algorithm",
             jar="{{ params.get('JAR') }}",
+            image="{{ params.get('SPARK_IMAGE') }}",
             main_class="eu.dnetlib.iis.wf.citationmatching.direct.CitationMatchingDirectJob",
             arguments=[
-                "--inputAvroPath", "{{ params.get('input') }}/",
-                "--inputPmcIdsMappingCSV", "{{ params.get('inputPmcIdsMappingCSV') }}/",
-                "--outputAvroPath", "{{ params.get('output') }}/",
-                "--outputReportPath", "{{ params.get('output_report_root_path') }}/"               
+                "--inputAvroPath", "{{ params.get('input') }}",
+                "--inputPmcIdsMappingCSV", "{{ params.get('inputPmcIdsMappingCSV') }}",
+                "--outputAvroPath", "{{ params.get('output') }}",
+                "--outputReportPath", "{{ params.get('output_report_root_path') }}"               
             ],
             spark_extra_conf={
-                "spark.executor.memory": "{{ params.get('sparkExecutorMemory') }}/",
-                "spark.executor.memoryOverhead": "{{ params.get('sparkExecutorOverhead') }}/"
+                "spark.executor.memory": "{{ params.get('sparkExecutorMemory') }}",
+                "spark.executor.memoryOverhead": "{{ params.get('sparkExecutorOverhead') }}",
+                "spark.driverEnv.HADOOP_USER_NAME" : "{{ params.get('HADOOP_USER_NAME') }}",
+                "spark.executorEnv.HADOOP_USER_NAME" : "{{ params.get('HADOOP_USER_NAME') }}",
+                "spark.driverEnv.SPARK_USER" : "{{ params.get('HADOOP_USER_NAME') }}",
+                "spark.executorEnv.SPARK_USER" : "{{ params.get('HADOOP_USER_NAME') }}",
+                "spark.kubernetes.driverEnv.HADOOP_USER_NAME": "{{ params.get('HADOOP_USER_NAME') }}",
+                "spark.kubernetes.executorEnv.HADOOP_USER_NAME": "{{ params.get('HADOOP_USER_NAME') }}"
             }
         )
     
