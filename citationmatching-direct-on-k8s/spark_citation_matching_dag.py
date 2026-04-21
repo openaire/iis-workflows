@@ -44,7 +44,7 @@ default_args = {
             description=""),
         # --- I/O paths (most commonly overridden) ---
         "input": Param(
-            default="hdfs://nameservice1/user/dnet.production/iis/working_dirs/primary/transformers_metadatamerger/output_merged_metadata",
+            default="hdfs://nameservice1/tmp/marek.horst/citationmatching-direct/input-small",
             type="string",
             description="Input Avro path with publications metadata including bibliographic references",
         ),
