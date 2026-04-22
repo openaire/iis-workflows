@@ -73,7 +73,6 @@ default_args = {
         ),
 
         # --- Spark resource tuning ---
-        # --- TODO how to propagate sparkDriverMemory to the operator ---
         "sparkDriverMemory": Param(
             default="3g",
             type="string",
@@ -107,6 +106,7 @@ def citation_matching_direct():
                 "-outputReportPath", "{{ params.get('output_report_root_path') }}"               
             ],
             spark_extra_conf={
+                "spark.driver.memory": "{{ params.get('sparkDriverMemory') }}", 
                 "spark.executor.memory": "{{ params.get('sparkExecutorMemory') }}",
                 "spark.executor.memoryOverhead": "{{ params.get('sparkExecutorOverhead') }}",
                 "spark.driverEnv.HADOOP_USER_NAME" : "{{ params.get('HADOOP_USER_NAME') }}",
