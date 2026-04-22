@@ -7,10 +7,13 @@ from airflow.hooks.base import BaseHook
 from airflow.models.param import Param
 
 package_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(package_dir)
 
 # Ensure it's in sys.path
 if package_dir not in sys.path:
     sys.path.append(package_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
 
 import dag_utils
 from spark_configurator import generate_spark_operator, java_action
