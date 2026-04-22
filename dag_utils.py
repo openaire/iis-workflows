@@ -149,51 +149,11 @@ def merge_dicts(*dicts):
                 result[key] = value
     return result
 
-
-BUILD_PHASES = {
-    "beta_aggregator": "00_beta_graph_aggregator",
-    "prod_aggregator": "00_prod_graph_aggregator",
-    "aggregator": "00_graph_aggregator",
-    "merged": "01_graph_merged",
-    "raw": "02_graph_raw",
-    "grouped": "03_graph_grouped",
-    "cleaned_first": "04_graph_cleaned",
-    "resolved": "05_graph_resolved",
-    "inferred": "05_graph_inferred",
-    "dedup": "06_graph_dedup",
-    "consistent": "07_graph_consistent",
-    "dedup_enriched": "08_graph_dedup_enriched", # actionset
-    "orcid_enriched": "09_graph_orcid_enriched",
-    "enriched": "09_graph_enriched",
-    "cleaned_second": "10_graph_cleaned",
-    "blacklisted": "11_graph_blacklisted",
-
-    'relationsForBrokerPath': 'relations_for_broker',
-    "scholexplorer": "scholexplorer_graph"
-}
-
 def get_fs_prefix():
     return Variable.get("default_fs", default_var="")
 
 def get_dhp_jar():
     return Variable.get("default_jar", default_var=f"{get_fs_prefix()}/binaries/dhp-shade-package-1.2.5-SNAPSHOT.jar")
-
-
-GRAPH_ENTITIES = ["publication", "dataset", "otherresearchproduct", "software", "datasource", "organization", "person", "project", "relation"]
-
-RESULT_ENTITIES = ["publication", "dataset", "otherresearchproduct", "software"]
-
-GRAPH_ENTITIES_CLASS_NAMES = {
-    "publication": "eu.dnetlib.dhp.schema.oaf.Publication",
-    "dataset": "eu.dnetlib.dhp.schema.oaf.Dataset",
-    "otherresearchproduct": "eu.dnetlib.dhp.schema.oaf.OtherResearchProduct",
-    "software": "eu.dnetlib.dhp.schema.oaf.Software",
-    "datasource": "eu.dnetlib.dhp.schema.oaf.Datasource",
-    "organization": "eu.dnetlib.dhp.schema.oaf.Organization",
-    "person": "eu.dnetlib.dhp.schema.oaf.Person",
-    "project": "eu.dnetlib.dhp.schema.oaf.Project",
-    "relation": "eu.dnetlib.dhp.schema.oaf.Relation"
-}
 
 from airflow.models.baseoperator import chain
 
