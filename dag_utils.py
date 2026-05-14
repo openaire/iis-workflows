@@ -1,7 +1,7 @@
 from typing import Sequence
 
 from airflow.models import Variable
-from airflow.models.param import Param
+from airflow.sdk import Param
 from airflow.models.taskmixin import DependencyMixin
 from airflow.exceptions import AirflowSkipException
 
@@ -155,7 +155,7 @@ def get_fs_prefix():
 def get_dhp_jar():
     return Variable.get("default_jar", default_var=f"{get_fs_prefix()}/binaries/dhp-shade-package-1.2.5-SNAPSHOT.jar")
 
-from airflow.models.baseoperator import chain
+from airflow.sdk.bases.operator import chain
 
 def chain_sequence(start, task_groups, end):
     """

@@ -4,7 +4,7 @@ import sys
 from typing import Any
 
 from airflow.models import Variable
-from airflow.operators.empty import EmptyOperator
+from airflow.providers.standard.operators.empty import EmptyOperator
 
 package_dir = os.path.dirname(os.path.abspath(__file__))
 

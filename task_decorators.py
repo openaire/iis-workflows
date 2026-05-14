@@ -4,7 +4,7 @@ import json
 from typing import TYPE_CHECKING, Callable
 from airflow.models import Variable
 from airflow.sdk.bases.decorator import task_decorator_factory
-from airflow.operators.empty import EmptyOperator
+from airflow.providers.standard.operators.empty import EmptyOperator
 
 from airflow.providers.cncf.kubernetes.operators.spark_kubernetes import SparkKubernetesOperator
 
@@ -157,7 +157,10 @@ class SparkKubernetesAppOperator(SparkKubernetesOperator):
         return super().execute(context)
 
 
-class SparkSubmitAppOperator(SparkSubmitOperator):
+_SparkSubmitBase = SparkSubmitOperator if SparkSubmitOperator is not None else object
+
+
+class SparkSubmitAppOperator(_SparkSubmitBase):
     """spark-submit operator with deferred config resolution.
 
     Mirrors SparkKubernetesAppOperator's callable pattern for the spark-submit
