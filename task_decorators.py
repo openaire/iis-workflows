@@ -139,6 +139,11 @@ class SparkKubernetesAppOperator(SparkKubernetesOperator):
             deferrable=False,
             **kwargs,
         )
+        # All templating uses inline {{ }} expressions, never file references.
+        # Disable file-based template loading so that strings ending in .json
+        # (e.g. classpath paths in `arguments`) are not mistakenly resolved as
+        # Jinja template files from the DAG bundle filesystem.
+        self.template_ext = ()
 
     def execute(self, context):
         config = self._python_callable(*self._op_args, **self._op_kwargs)
