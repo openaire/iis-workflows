@@ -49,7 +49,7 @@ default_args = {
     default_args=default_args,
     params={
         "JAR": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-transformers/1.3.0-SNAPSHOT/iis-wf-transformers-1.3.0-20260519.155423-2-test-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-transformers/1.3.0-SNAPSHOT/iis-wf-transformers-1.3.0-20260520.160946-5-test-uber.jar",
             type="string",
             description="iis-wf-transformers test uber JAR (built with -Pshade-test-uber-jar).",
         ),
