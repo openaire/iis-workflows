@@ -89,7 +89,7 @@ default_args = {
             description="Off-heap memory overhead per executor, expressed in kilobytes (e.g., 2048 for 2GB)",
         ),
     },
-    tags=["openaire", "citationmatching"],
+    tags=["openaire", "iis", "citationmatching"],
     schedule=None
 )
 def citation_matching_direct():
