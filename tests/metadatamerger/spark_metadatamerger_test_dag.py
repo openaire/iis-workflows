@@ -78,7 +78,7 @@ default_args = {
                         "Contains production classes + TestingConsumer/TestsIOUtils from iis-common + JSON fixtures.",
         ),
         "SPARK_IMAGE": Param(
-            "docker-registry.openaire.eu/kubernetes_devel/spark:4.1.1",
+            "docker-registry.openaire.eu/kubernetes_devel/spark:4.1.2",
             type="string",
             description="Spark Docker image",
         ),

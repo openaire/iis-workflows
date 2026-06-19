@@ -54,7 +54,7 @@ default_args = {
             description="iis-wf-transformers test uber JAR (built with -Pshade-test-uber-jar).",
         ),
         "SPARK_IMAGE": Param(
-            "docker-registry.openaire.eu/kubernetes_devel/spark:4.1.1",
+            "docker-registry.openaire.eu/kubernetes_devel/spark:4.1.2",
             type="string",
             description="Spark Docker image",
         ),

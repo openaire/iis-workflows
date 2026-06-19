@@ -39,7 +39,7 @@ default_args = {
             description="citation matching shaded jar"
         ),
         "SPARK_IMAGE": Param(
-            "docker-registry.openaire.eu/kubernetes_devel/spark:4.1.1",
+            "docker-registry.openaire.eu/kubernetes_devel/spark:4.1.2",
             type='string',
             description=""),
         "HADOOP_USER_NAME": Param(
