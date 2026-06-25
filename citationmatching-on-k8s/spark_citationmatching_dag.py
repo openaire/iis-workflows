@@ -109,12 +109,27 @@ default_args = {
             description="Max number of citation-document pairs for a given hash bucket",
         ),
         "numberOfPartitions": Param(
-            default="5",
+            default="100",
             type="string",
             description="Number of partitions used for RDDs with citations and documents read from input files",
         ),
 
         # --- Spark resource tuning ---
+        "sparkNetworkTimeout": Param(
+            default="1200s",
+            type="string",
+            description="Spark network timeout; also controls executor heartbeat deadline (oozie: citationMatchingSparkNetworkTimeout)",
+        ),
+        "sparkShuffleRegistrationTimeout": Param(
+            default="30000",
+            type="string",
+            description="Timeout (ms) for executor registration with the external shuffle service / Celeborn (oozie: citationMatchingSparkShuffleRegistrationTimeout)",
+        ),
+        "celebornMaxReviveTimes": Param(
+            default="10",
+            type="string",
+            description="Maximum number of Celeborn revive attempts per push before the task is failed",
+        ),
         "sparkDriverMemory": Param(
             default="10g",
             type="string",
@@ -139,6 +154,13 @@ def citation_matching():
         "spark.driver.memory": "{{ params.get('sparkDriverMemory') }}",
         "spark.executor.memory": "{{ params.get('sparkExecutorMemory') }}",
         "spark.executor.memoryOverhead": "{{ params.get('sparkExecutorOverhead') }}",
+        # Network / shuffle timeouts — critical for the heavy shuffle in citation matching.
+        # These mirror the oozie workflow's citationMatchingSparkNetworkTimeout and
+        # citationMatchingSparkShuffleRegistrationTimeout properties.
+        "spark.network.timeout": "{{ params.get('sparkNetworkTimeout') }}",
+        "spark.shuffle.registration.timeout": "{{ params.get('sparkShuffleRegistrationTimeout') }}",
+        # Celeborn — allow more revive attempts before a push is considered fatal.
+        "spark.celeborn.client.push.maxReviveTimes": "{{ params.get('celebornMaxReviveTimes') }}",
         "spark.driverEnv.HADOOP_USER_NAME": "{{ params.get('HADOOP_USER_NAME') }}",
         "spark.executorEnv.HADOOP_USER_NAME": "{{ params.get('HADOOP_USER_NAME') }}",
         "spark.driverEnv.SPARK_USER": "{{ params.get('HADOOP_USER_NAME') }}",
