@@ -124,10 +124,11 @@ def referenceextraction_covid19():
     # The HDFS path is pushed as XCom (last stdout line) and consumed by the
     # Spark task below via ti.xcom_pull().
     # ---------------------------------------------------------------------------
-    extract_scripts = BashOperator(
-        task_id="extract_scripts_from_jar",
-        task_display_name="Extract COVID-19 matching scripts from uber-JAR to HDFS",
-        bash_command="""
+    if False:  # TODO: re-enable once `hdfs` is available on the Airflow worker; see extract_scripts >> spark_task below
+        extract_scripts = BashOperator(
+            task_id="extract_scripts_from_jar",
+            task_display_name="Extract COVID-19 matching scripts from uber-JAR to HDFS",
+            bash_command="""
 set -euo pipefail
 
 export HADOOP_USER_NAME="{{ params.get('HADOOP_USER_NAME') }}"
@@ -162,8 +163,8 @@ hdfs dfs -put "${TMP_DIR}/scripts" "${SCRIPTS_HDFS_PARENT}/" >&2
 # This is the sole stdout line — BashOperator XCom captures it as return_value
 echo "${SCRIPTS_HDFS_PATH}"
 """,
-        do_xcom_push=True,
-    )
+            do_xcom_push=True,
+        )
 
     # ---------------------------------------------------------------------------
     # Step 2: run the Spark job.  The scriptDirPath argument is resolved from
@@ -201,7 +202,6 @@ echo "${SCRIPTS_HDFS_PATH}"
     )
 
     # extract_scripts >> spark_task
-    spark_task
 
 
 referenceextraction_covid19()
