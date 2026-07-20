@@ -51,6 +51,14 @@ default_args = {
             description=""),
 
         # --- I/O paths ---
+
+        # --- currently this path is set explicitly, no extraction from jar package due to the missing `hdfs` command on the pod
+        "scriptDirPath": Param(
+            default="hdfs://nameservice1/tmp/marek.horst/referenceextraction_covid19/scripts",
+            type="string",
+            description="Input HDFS path holding covid-19 madis script",
+        ),
+
         "inputAvroPath": Param(
             default="hdfs://nameservice1/user/dnet.production/iis/working_dirs/primary/transformers_metadatamerger/output_merged_metadata",
             type="string",
@@ -104,6 +112,9 @@ default_args = {
 )
 def referenceextraction_covid19():
     # ---------------------------------------------------------------------------
+    # NOTICE: currently this step is disabled because of the missing `hdfs` command on the pod.
+    # ---------------------------------------------------------------------------
+    # 
     # Step 1: extract the matching scripts from the uber-JAR and stage them on
     # HDFS.  The JAR is a ZIP archive, so unzip can pull out just the scripts/
     # subtree without downloading twice.  The extracted scripts/ directory is
@@ -172,7 +183,8 @@ echo "${SCRIPTS_HDFS_PATH}"
             "-outputAvroPath",            "{{ params.get('outputAvroPath') }}",
             "-predefinedConceptId",       "{{ params.get('predefinedConceptId') }}",
             "-predefinedConfidenceLevel", "{{ params.get('predefinedConfidenceLevel') }}",
-            "-scriptDirPath",             "{{ ti.xcom_pull(task_ids='extract_scripts_from_jar') }}",
+            # "-scriptDirPath",             "{{ ti.xcom_pull(task_ids='extract_scripts_from_jar') }}",
+            "-scriptDirPath",             "{{ params.get('scriptDirPath') }}",
             "-numberOfPartitions",        "{{ params.get('numberOfPartitions') }}",
             "-outputReportPath",          "{{ params.get('outputReportPath') }}",
         ],
@@ -188,7 +200,8 @@ echo "${SCRIPTS_HDFS_PATH}"
         }
     )
 
-    extract_scripts >> spark_task
+    # extract_scripts >> spark_task
+    spark_task
 
 
 referenceextraction_covid19()
