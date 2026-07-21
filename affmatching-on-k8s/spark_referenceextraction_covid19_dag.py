@@ -34,7 +34,7 @@ default_args = {
     default_args=default_args,
     params={
         "JAR": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-referenceextraction/1.3.0-SNAPSHOT/iis-wf-referenceextraction-1.3.0-20260720.150035-2-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-referenceextraction/1.3.0-SNAPSHOT/iis-wf-referenceextraction-1.3.0-20260721.094043-3-uber.jar",
             type='string',
             description="iis-wf-referenceextraction uber jar"
         ),
