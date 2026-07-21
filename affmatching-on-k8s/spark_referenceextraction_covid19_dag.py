@@ -91,7 +91,7 @@ default_args = {
 
         # --- Spark tuning ---
         "numberOfPartitions": Param(
-            default="",
+            default="$UNDEFINED$",
             type="string",
             description="Number of RDD partitions for the input dataset "
                         "(leave empty to use the natural partition count of the input Avro files)",
