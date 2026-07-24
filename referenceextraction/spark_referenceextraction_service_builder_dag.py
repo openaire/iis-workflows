@@ -78,7 +78,7 @@ default_args = {
         # ------------------------------------------------------------------ #
         "JAR": Param(
             default=(
-                "https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-referenceextraction/1.3.0-SNAPSHOT/iis-wf-referenceextraction-1.3.0-20260724.111203-8-uber.jar"
+                "https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-referenceextraction/1.3.0-SNAPSHOT/iis-wf-referenceextraction-1.3.0-20260724.113248-9-uber.jar"
             ),
             type="string",
             description="iis-wf-referenceextraction uber JAR URL",
@@ -209,26 +209,14 @@ echo "[STEP 1] Downloading uber-JAR from $JAR_URL"
 curl -fsSL -o "${TMP_DIR}/${JAR_FILENAME}" "$JAR_URL"
 
 # ------------------------------------------------------------------ #
-#  2.  Extract resources from the JAR                                 #
+#  2.  Extract SQL builder script from the uber-JAR                  #
 # ------------------------------------------------------------------ #
-echo "[STEP 2] Extracting MadIS Python scripts and SQL from JAR"
-
-# 2a. MadIS Python toolkit — ServiceDBBuilder calls
-#     Runtime.exec("python $MADIS_HOME/mexec.py …") so the
-#     scripts/madis/ tree must be on the filesystem.
-mkdir -p "${TMP_DIR}/scripts/madis"
-unzip -j -o "${TMP_DIR}/${JAR_FILENAME}" \
-    "*/scripts/madis/*" \
-    -d "${TMP_DIR}/scripts/madis" >&2
-
-# 2b. The SQL builder script (buildeoscdb.sql)
+echo "[STEP 2] Extracting SQL builder script from JAR"
 mkdir -p "${TMP_DIR}/scripts"
 unzip -j -o "${TMP_DIR}/${JAR_FILENAME}" \
     "*/sqlite_builder/oozie_app/lib/scripts/buildeoscdb.sql" \
     -d "${TMP_DIR}/scripts" >&2
 
-chmod -R +x "${TMP_DIR}/scripts/madis/"
-ls -la "${TMP_DIR}/scripts/madis/mexec.py"
 ls -la "${TMP_DIR}/scripts/buildeoscdb.sql"
 
 # ------------------------------------------------------------------ #
