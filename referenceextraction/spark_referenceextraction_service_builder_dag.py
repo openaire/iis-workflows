@@ -21,7 +21,7 @@ Architecture recap
 ServiceDBBuilder (inheriting AbstractDBBuilder<Service>):
   • Reads Avro Service records from the HDFS input path.
   • Pipes them line-by-line as JSON to a MadIS subprocess stdin.
-  • The subprocess (python $MADIS_HOME/mexec.py -w <db> -f <sql>) creates
+  • The subprocess (python /opt/madis/mexec.py -w <db> -f <sql>) creates
     a local SQLite database.
   • Copies the resulting SQLite DB to the HDFS output path.
 
@@ -78,7 +78,7 @@ default_args = {
         # ------------------------------------------------------------------ #
         "JAR": Param(
             default=(
-                "https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-referenceextraction/1.3.0-SNAPSHOT/iis-wf-referenceextraction-1.3.0-20260722.142726-5-uber.jar"
+                "https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-referenceextraction/1.3.0-SNAPSHOT/iis-wf-referenceextraction-1.3.0-20260724.111203-8-uber.jar"
             ),
             type="string",
             description="iis-wf-referenceextraction uber JAR URL",
@@ -122,7 +122,7 @@ default_args = {
         # ------------------------------------------------------------------ #
         "inputServicePath": Param(
             default=(
-                "hdfs://nameservice1/user/dnet.production/iis/working_dirs/primary/primary_import/metadataimport/service"
+                "hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/user/dnet.production/iis/working_dirs/primary/primary_import/metadataimport/service"
             ),
             type="string",
             description=(
