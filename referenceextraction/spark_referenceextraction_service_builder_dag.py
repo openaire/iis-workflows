@@ -262,9 +262,16 @@ echo "  Script:  ${TMP_DIR}/scripts/buildeoscdb.sql"
 
 cd "${TMP_DIR}"
 
+# Build classpath from the image's Spark installation.  The base
+# spark:4.1.2 image ships all of its JARs (including Hadoop client
+# libraries bundled via the -Phadoop-cloud profile) under /opt/spark/jars/.
+# That's sufficient to satisfy the Hadoop/commons dependencies that
+# ProcessWrapper and ServiceDBBuilder need at runtime.
+SPARK_CP="/opt/spark/jars/*"
+
 java \
     -Djava.io.tmpdir="${TMP_DIR}" \
-    -cp "${TMP_DIR}/conf:${TMP_DIR}/${JAR_FILENAME}" \
+    -cp "${TMP_DIR}/conf:${SPARK_CP}:${TMP_DIR}/${JAR_FILENAME}" \
     eu.dnetlib.iis.common.java.ProcessWrapper \
     eu.dnetlib.iis.wf.referenceextraction.service.ServiceDBBuilder \
     -Iservice="{{ params.inputServicePath }}" \
