@@ -63,8 +63,8 @@ default_args = {
 
 
 @dag(
-    dag_id="spark_referenceextraction_service_builder",
-    dag_display_name="Build Service SQLite DB from Avro records using MadIS",
+    dag_id="spark_referenceextraction_generic_builder",
+    dag_display_name="Build SQLite DB from Avro records using MadIS (generic)",
     default_args=default_args,
     params={
         # ------------------------------------------------------------------ #
