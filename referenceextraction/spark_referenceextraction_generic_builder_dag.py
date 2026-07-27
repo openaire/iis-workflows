@@ -109,7 +109,7 @@ default_args = {
         #  Builder class                                                     #
         # ------------------------------------------------------------------ #
         "BUILDER_CLASS": Param(
-            default="eu.dnetlib.iis.wf.referenceextraction.service.ServiceDBBuilder",
+            default="eu.dnetlib.iis.wf.referenceextraction.project.ProjectDBBuilder",
             type="string",
             description="Fully qualified class name of the AbstractDBBuilder subclass",
         ),
@@ -119,14 +119,14 @@ default_args = {
         # ------------------------------------------------------------------ #
         "INPUT_PATH": Param(
             default=(
-                "hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/user/dnet.production/iis/working_dirs/primary/primary_import/metadataimport/service"
+                "hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/user/marek.horst/wf/referenceextraction/project/input_filter/working_dir/output_approved"
             ),
             type="string",
             description="HDFS input Avro path",
         ),
         "OUTPUT_PATH": Param(
             default=(
-                "hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/marek.horst/referenceextraction_service/services.db"
+                "hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/marek.horst/referenceextraction_sqlite_builder/default.db"
             ),
             type="string",
             description="HDFS output path for the SQLite database file",
@@ -136,18 +136,20 @@ default_args = {
         #  Script and resources                                               #
         # ------------------------------------------------------------------ #
         "SQL_SCRIPT": Param(
-            default="scripts/buildeoscdb.sql",
+            default="scripts/buildprojectdb.sql",
             type="string",
-            description="SQL script filename inside the JAR",
+            description="SQL script filename inside the JAR"
+                "Mind the simplified location of the script file which is meant to be searched within '*/sqlite_builder/**'",
         ),
         "INIT_DB_LOCATION": Param(
-            default="$UNDEFINED$",
+            default="eu/dnetlib/iis/wf/referenceextraction/project/sqlite_builder/oozie_app/lib/scripts/base_projects.db",
             type="string",
             description=(
                 "Optional path of a base SQLite DB file inside the JAR to use as "
                 "initial database content.  Set only for builders that need it: "
                 "Patent → '**/base_lens.db',  Project → '**/base_projects.db'. "
-                "Leave as $UNDEFINED$ for builders that create the DB from scratch."
+                "Leave as $UNDEFINED$ for builders that create the DB from scratch." 
+                "This has to be provided as the full classpath location of the database file. "
             ),
         ),
 
