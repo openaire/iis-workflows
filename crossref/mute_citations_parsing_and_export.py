@@ -33,7 +33,7 @@ default_args = {
     default_args=default_args,
     params={
         "JAR_METADATAEXTRACTION": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20260730.152742-1-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20260730.155929-1-uber.jar",
             type='string',
             description="iis-wf-metadataextraction uber jar containing JsonReferenceParserJob"
         ),
