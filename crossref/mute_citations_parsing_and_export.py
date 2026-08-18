@@ -33,7 +33,7 @@ default_args = {
     default_args=default_args,
     params={
         "JAR_METADATAEXTRACTION": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20260730.155929-1-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20260818.141714-4-uber.jar",
             type='string',
             description="iis-wf-metadataextraction uber jar containing JsonReferenceParserJob"
         ),
@@ -54,7 +54,7 @@ default_args = {
         # --- I/O paths ---
 
         "inputJsonPath": Param(
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/user/zeppelin/miriam/crossrefMuteCitations",
+            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/user/marek.horst/crossrefMuteCitations/micro",
             type="string",
             description="Input HDFS path with gzip-compressed JSON packages "
                         "(one JSON record per line with id and ref fields)",
@@ -87,6 +87,26 @@ default_args = {
             type="string",
             description="Value to set in ExtractedDocumentMetadata#extractedBy field",
         ),
+        "referenceParser": Param(
+            default="grobid",
+            type="string",
+            description="Reference text parser to use: 'cermine' (default) or 'grobid'",
+        ),
+        "grobidServerUrl": Param(
+            default="https://grobid.openaire-cloud.icm.edu.pl",
+            type="string",
+            description="Grobid server location, required when referenceParser is set to 'grobid'",
+        ),
+        "grobidConnectionTimeout": Param(
+            default="30000",
+            type="string",
+            description="Grobid connection timeout in ms",
+        ),
+        "grobidReadTimeout": Param(
+            default="60000",
+            type="string",
+            description="Grobid read timeout in ms",
+        ),
 
         # --- Spark tuning ---
         "sparkDriverMemory": Param(
@@ -95,7 +115,7 @@ default_args = {
             description="Memory for the Spark driver",
         ),
         "sparkExecutorMemory": Param(
-            default="8g",
+            default="10g",
             type="string",
             description="Memory per Spark executor",
         ),
@@ -118,6 +138,10 @@ def mute_citations_parsing_and_export():
             "-outputPath",      "{{ params.get('outputAvroPath') }}",
             "-outputReportPath","{{ params.get('outputReportPath') }}/parse",
             "-extractedBy",     "{{ params.get('extractedBy') }}",
+            "-referenceParser", "{{ params.get('referenceParser') }}",
+            "-grobidServerUrl", "{{ params.get('grobidServerUrl') }}",
+            "-grobidConnectionTimeout", "{{ params.get('grobidConnectionTimeout') }}",
+            "-grobidReadTimeout", "{{ params.get('grobidReadTimeout') }}",
         ],
         spark_extra_conf={
             "spark.driver.memory":   "{{ params.get('sparkDriverMemory') }}",
