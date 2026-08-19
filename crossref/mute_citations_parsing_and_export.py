@@ -33,7 +33,7 @@ default_args = {
     default_args=default_args,
     params={
         "JAR_METADATAEXTRACTION": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20260818.141714-4-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20260819.103816-5-uber.jar",
             type='string',
             description="iis-wf-metadataextraction uber jar containing JsonReferenceParserJob"
         ),
@@ -93,7 +93,7 @@ default_args = {
             description="Reference text parser to use: 'cermine' (default) or 'grobid'",
         ),
         "grobidServerUrl": Param(
-            default="https://grobid.openaire-cloud.icm.edu.pl",
+            default="http://10.19.65.11:8070",
             type="string",
             description="Grobid server location, required when referenceParser is set to 'grobid'",
         ),
