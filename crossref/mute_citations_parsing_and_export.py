@@ -33,7 +33,7 @@ default_args = {
     default_args=default_args,
     params={
         "JAR_METADATAEXTRACTION": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20260820.134928-6-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20260820.144440-7-uber.jar",
             type='string',
             description="iis-wf-metadataextraction uber jar containing JsonReferenceParserJob"
         ),
@@ -108,6 +108,13 @@ default_args = {
             description="Grobid read timeout in ms",
         ),
 
+        # --- Algorithm parameters (Grobid batching) ---
+        "grobidBatchSize": Param(
+            default=32,
+            type="integer",
+            description="Number of citations sent to Grobid per /api/processCitationList request",
+        ),
+
         # --- Spark tuning ---
         "sparkDriverMemory": Param(
             default="8g",
@@ -118,6 +125,23 @@ default_args = {
             default="10g",
             type="string",
             description="Memory per Spark executor",
+        ),
+        "sparkExecutorInstances": Param(
+            default=6,
+            type="integer",
+            description="Number of Spark executors for the parse task "
+                        "(total in-flight Grobid requests ≈ executors × cores)",
+        ),
+        "sparkExecutorCores": Param(
+            default=2,
+            type="integer",
+            description="CPU cores per Spark executor for the parse task",
+        ),
+        "sparkDynamicAllocation": Param(
+            default=False,
+            type="boolean",
+            description="Enable Spark dynamic allocation for the parse task "
+                        "(recommended False so Grobid concurrency is predictable)",
         ),
     },
     tags=["openaire", "iis", "crossref", "mutecitation"],
@@ -142,10 +166,16 @@ def mute_citations_parsing_and_export():
             "-grobidServerUrl", "{{ params.get('grobidServerUrl') }}",
             "-grobidConnectionTimeout", "{{ params.get('grobidConnectionTimeout') }}",
             "-grobidReadTimeout", "{{ params.get('grobidReadTimeout') }}",
+            "-grobidBatchSize", "{{ params.get('grobidBatchSize') }}",
         ],
         spark_extra_conf={
             "spark.driver.memory":   "{{ params.get('sparkDriverMemory') }}",
             "spark.executor.memory": "{{ params.get('sparkExecutorMemory') }}",
+            # predictable concurrency to Grobid: fixed executor count/cores and
+            # dynamic allocation off, so in-flight requests ≈ executors × cores
+            "spark.executor.instances": "{{ params.get('sparkExecutorInstances') }}",
+            "spark.executor.cores":     "{{ params.get('sparkExecutorCores') }}",
+            "spark.dynamicAllocation.enabled": "{{ 'true' if params.get('sparkDynamicAllocation') else 'false' }}",
             "spark.driverEnv.HADOOP_USER_NAME":          "{{ params.get('HADOOP_USER_NAME') }}",
             "spark.executorEnv.HADOOP_USER_NAME":        "{{ params.get('HADOOP_USER_NAME') }}",
             "spark.driverEnv.SPARK_USER":                "{{ params.get('HADOOP_USER_NAME') }}",
