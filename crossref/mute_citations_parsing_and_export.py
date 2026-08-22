@@ -93,7 +93,7 @@ default_args = {
             description="Reference text parser to use: 'cermine' (default) or 'grobid'",
         ),
         "grobidServerUrl": Param(
-            default="http://grobid:8070",
+            default="http://grobid.default:8070",
             type="string",
             description="Grobid server location, required when referenceParser is set to 'grobid'",
         ),
