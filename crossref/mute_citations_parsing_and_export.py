@@ -33,7 +33,7 @@ default_args = {
     default_args=default_args,
     params={
         "JAR_METADATAEXTRACTION": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20260825.112852-10-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20260825.164840-11-uber.jar",
             type='string',
             description="iis-wf-metadataextraction uber jar containing JsonReferenceParserJob"
         ),
@@ -54,7 +54,7 @@ default_args = {
         # --- I/O paths ---
 
         "inputJsonPath": Param(
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/user/marek.horst/crossrefMuteCitations/micro",
+            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/user/marek.horst/crossrefMuteCitations/medium",
             type="string",
             description="Input HDFS path with gzip-compressed JSON packages "
                         "(one JSON record per line with id and ref fields)",
@@ -110,7 +110,7 @@ default_args = {
 
         # --- Algorithm parameters (Grobid batching) ---
         "grobidBatchSize": Param(
-            default=25,
+            default=10,
             type="integer",
             description="Number of citations sent to Grobid per /api/processCitationList request",
         ),
@@ -127,7 +127,7 @@ default_args = {
             description="Memory per Spark executor",
         ),
         "sparkExecutorInstances": Param(
-            default=6,
+            default=8,
             type="integer",
             description="Number of Spark executors for the parse task "
                         "(total in-flight Grobid requests ≈ executors × cores)",
