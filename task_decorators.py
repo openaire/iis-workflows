@@ -38,6 +38,7 @@ def _resolve_config(config: dict, defaults: dict) -> dict:
         "spark_extra_conf": config.get("spark_extra_conf", defaults.get("spark_extra_conf", {})) or {},
         "image":            config.get("image",            defaults.get("image")),
         "py_files":         config.get("py_files",         defaults.get("py_files", [])) or [],
+        "dynamic_allocation": config.get("dynamic_allocation", defaults.get("dynamic_allocation")),
     }
     r["is_python"]     = r["main_class"].endswith(".py")
     r["effective_jar"] = r["jar"] or (None if r["is_python"] else dag_utils.get_dhp_jar())
@@ -67,6 +68,14 @@ def _build_k8s_spec(task_id: str, r: dict) -> dict:
             "arguments":           r["arguments"],
         }
 
+    # SparkApplication exposes dynamic allocation as a first-class spec field which the
+    # operator turns into spark.dynamicAllocation.* properties that override any sparkConf
+    # entries. The operator's defaulting webhook enables it (with its own maxExecutors) when
+    # the field is absent, so emit it explicitly to honor per-job intent (e.g. disabled, or
+    # fixed executors for predictable concurrency).
+    if r.get("dynamic_allocation"):
+        spec["dynamicAllocation"] = _normalize_dynamic_allocation(r["dynamic_allocation"])
+
     template_spec = dag_utils.merge_dicts(
         {
             "metadata": {"name": task_id.lower() + "-{{ ds }}-{{ task_instance.try_number }}"},
@@ -80,6 +89,23 @@ def _build_k8s_spec(task_id: str, r: dict) -> dict:
         template_spec["spec"]["image"] = r["image"]
 
     return template_spec
+
+
+def _normalize_dynamic_allocation(da: dict) -> dict:
+    """Coerce Jinja-rendered string values into CRD-native bool/int types."""
+    normalized = dict(da)
+    for key in ("enabled", "shuffleTrackingEnabled"):
+        value = normalized.get(key)
+        if isinstance(value, str):
+            normalized[key] = value.strip().lower() in ("true", "1")
+    for key in ("minExecutors", "maxExecutors", "initialExecutors"):
+        value = normalized.get(key)
+        if isinstance(value, str):
+            try:
+                normalized[key] = int(value)
+            except ValueError:
+                pass
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +132,7 @@ class SparkKubernetesAppOperator(SparkKubernetesOperator):
             spark_extra_conf: dict[str, str] = None,
             image: str = None,
             py_files: list[str] = None,
+            dynamic_allocation: dict = None,
             **kwargs,
     ):
         self._python_callable = python_callable
@@ -118,6 +145,7 @@ class SparkKubernetesAppOperator(SparkKubernetesOperator):
             "spark_extra_conf": spark_extra_conf or {},
             "image":            image,
             "py_files":         py_files or [],
+            "dynamic_allocation": dynamic_allocation,
         }
 
         # Minimal placeholder so the parent can initialise cleanly.
@@ -184,6 +212,7 @@ class SparkSubmitAppOperator(_SparkSubmitBase):
             spark_extra_conf: dict[str, str] = None,
             image: str = None,
             py_files: list[str] = None,
+            dynamic_allocation: dict = None,
             **kwargs,
     ):
         self._python_callable = python_callable
@@ -196,6 +225,7 @@ class SparkSubmitAppOperator(_SparkSubmitBase):
             "spark_extra_conf": spark_extra_conf or {},
             "image":            image,
             "py_files":         py_files or [],
+            "dynamic_allocation": dynamic_allocation,
         }
 
         # application and conf are placeholders; execute() sets the real values

@@ -33,7 +33,7 @@ default_args = {
     default_args=default_args,
     params={
         "JAR_METADATAEXTRACTION": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20260824.142237-9-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20260825.112852-10-uber.jar",
             type='string',
             description="iis-wf-metadataextraction uber jar containing JsonReferenceParserJob"
         ),
@@ -110,7 +110,7 @@ default_args = {
 
         # --- Algorithm parameters (Grobid batching) ---
         "grobidBatchSize": Param(
-            default=32,
+            default=25,
             type="integer",
             description="Number of citations sent to Grobid per /api/processCitationList request",
         ),
@@ -168,6 +168,15 @@ def mute_citations_parsing_and_export():
             "-grobidReadTimeout", "{{ params.get('grobidReadTimeout') }}",
             "-grobidBatchSize", "{{ params.get('grobidBatchSize') }}",
         ],
+        # SparkApplication exposes dynamic allocation as a first-class spec field that
+        # overrides sparkConf entries; emit it explicitly so the operator's defaulting
+        # webhook (enabled=true, maxExecutors=14) does not win over our settings.
+        dynamic_allocation={
+            "enabled": "{{ 'true' if params.get('sparkDynamicAllocation') else 'false' }}",
+            "minExecutors": "1",
+            "maxExecutors": "{{ params.get('sparkExecutorInstances') }}",
+            "shuffleTrackingEnabled": "{{ 'true' if params.get('sparkDynamicAllocation') else 'false' }}",
+        },
         spark_extra_conf={
             "spark.driver.memory":   "{{ params.get('sparkDriverMemory') }}",
             "spark.executor.memory": "{{ params.get('sparkExecutorMemory') }}",

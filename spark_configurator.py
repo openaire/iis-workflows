@@ -28,6 +28,7 @@ def generate_spark_operator(
         spark_extra_conf: dict[str, str] = None,
         image: str = None,
         py_files: list[str] = None,
+        dynamic_allocation: dict = None,
 ) -> Any:
     """Factory for a Spark Operator for JVM (class name) or PySpark (.py path) apps.
 
@@ -47,6 +48,7 @@ def generate_spark_operator(
         spark_extra_conf=spark_extra_conf,
         image=image,
         py_files=py_files,
+        dynamic_allocation=dynamic_allocation,
     )
 
     match spark_provider:
