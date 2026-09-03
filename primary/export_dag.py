@@ -8,7 +8,6 @@ onto Airflow/Kubernetes.
 Original Oozie graph (sub-workflows referenced via `import.txt`):
 
     export_actionmanager_sequencefile ─ (fork) ─ decision_software_exporter
-                                              ├─ decision_patent_exporter
                                               └─ decision_citation_relation_exporter
          └ export_join ─ primary_export_push_reports ─ distcp_output ─ end
 
@@ -17,8 +16,9 @@ Airflow mapping
   * export_actionmanager_sequencefile  → triggers the already-ported DAG
         `spark_sequencefile_exporter` (sequencefile-exporter-on-k8s) via
         TriggerDagRunOperator and waits for its completion.
-  * software / patent / citation-relation exporters are Spark jobs declared
-        inline here (they are not reused elsewhere).
+  * software and citation-relation exporters are Spark jobs declared inline
+        here (they are not reused elsewhere); patent relations are exported by
+        the sequencefile exporter (input_document_to_patent).
   * primary_export_push_reports        → KubernetesPodOperator running
         `ProcessWrapper` around `eu.dnetlib.iis.wf.report.pushgateway.process.PushMetricsProcess`
         (same generic ProcessWrapper pattern as spark_referenceextraction_generic_builder_dag.py).
@@ -27,8 +27,8 @@ Airflow mapping
 
 A single uber JAR (`iis-wf-primary`) is referenced by every Spark/Java task, so
 the class of each exporter (SequenceFileExporterJob, SoftwareExporterJob,
-PatentExporterJob, CitationRelationExporterJob, PushMetricsProcess, hadoop tools)
-is resolved from that one shaded artifact.
+CitationRelationExporterJob, PushMetricsProcess, hadoop tools) is resolved from
+that one shaded artifact.
 """
 
 import os
@@ -70,9 +70,6 @@ _SEQUENCEFILE_DAG_ID = "spark_sequencefile_exporter"
 _SOFTWARE_EXPORTER_CLASS = (
     "eu.dnetlib.iis.wf.export.actionmanager.entity.software.SoftwareExporterJob"
 )
-_PATENT_EXPORTER_CLASS = (
-    "eu.dnetlib.iis.wf.export.actionmanager.entity.patent.PatentExporterJob"
-)
 _CITATION_RELATION_EXPORTER_CLASS = (
     "eu.dnetlib.iis.wf.export.actionmanager.relation.citation.CitationRelationExporterJob"
 )
@@ -92,15 +89,6 @@ def _decision_software_exporter(params):
     input_path = params.get("input_document_to_software_url")
     if str(active).lower() == "true" and input_path and input_path != _UNDEFINED:
         return ["software_exporter"]
-    return ["export_join"]
-
-
-def _decision_patent_exporter(params):
-    """patent exporter runs only when flag is set AND input path was defined."""
-    active = params.get("active_export_patent")
-    input_path = params.get("input_document_to_patent")
-    if str(active).lower() == "true" and input_path and input_path != _UNDEFINED:
-        return ["patent_exporter"]
     return ["export_join"]
 
 
@@ -132,7 +120,7 @@ def _decision_distcp(params):
             default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-primary/1.3.0-SNAPSHOT/iis-wf-primary-1.3.0-20260903.132346-1-uber.jar",
             type="string",
             description="Uber (shaded) JAR of the iis-wf-primary module. "
-                        "Contains every exporter class (sequencefile, software, patent, "
+                        "Contains every exporter class (sequencefile, software, "
                         "citation relation) plus the report PushMetricsProcess and hadoop tools.",
         ),
         "SPARK_IMAGE": Param(
@@ -238,12 +226,8 @@ def _decision_distcp(params):
         ),
         "input_document_to_patent": Param(
             default=_UNDEFINED, type="string",
-            description="Avro datastore with DocumentToPatent inferences (patent exporter). "
-                        "$UNDEFINED$ → skipped.",
-        ),
-        "input_patent": Param(
-            default=_UNDEFINED, type="string",
-            description="Avro datastore with Patent entities (patent exporter). $UNDEFINED$ → skipped.",
+            description="Avro datastore with DocumentToPatent inferences; exported as patent "
+                        "relations by the sequencefile exporter. $UNDEFINED$ → skipped.",
         ),
 
         # ------------------------------------------------------------------ #
@@ -252,10 +236,6 @@ def _decision_distcp(params):
         "active_export_software": Param(
             default="false", type="string",
             description="Flag indicating software entities should be exported.",
-        ),
-        "active_export_patent": Param(
-            default="false", type="string",
-            description="Flag indicating patent entities should be exported.",
         ),
 
         # ------------------------------------------------------------------ #
@@ -275,7 +255,6 @@ def _decision_distcp(params):
         "action_set_id_document_patent": Param(default="actionset-id", type="string"),
         "action_set_id_document_software_url": Param(default="actionset-id", type="string"),
         "action_set_id_entity_software": Param(default="actionset-id", type="string"),
-        "action_set_id_entity_patent": Param(default="actionset-id", type="string"),
         "action_set_id_citation_relations": Param(default="actionset-id", type="string"),
 
         # ------------------------------------------------------------------ #
@@ -311,14 +290,6 @@ def _decision_distcp(params):
             default="http://www.rcsb.org/pdb/explore/explore.do?structureId=",
             type="string",
             description="PDB URL root concatenated with pdb identifier to form the final URL.",
-        ),
-        "patent_date_of_collection": Param(
-            default=_UNDEFINED, type="string",
-            description="Date of collection of patent file formatted as yyyy-MM-dd'T'HH:mm.",
-        ),
-        "patent_epo_url_root": Param(
-            default=_UNDEFINED, type="string",
-            description="EPO patent web archive URL root concatenated with patent auth and nr.",
         ),
 
         # ------------------------------------------------------------------ #
@@ -378,7 +349,7 @@ def _decision_distcp(params):
     schedule=None,
 )
 def primary_export():
-    """Uber exporter: sequencefile → software/patent/citation → push reports → distcp."""
+    """Uber exporter: sequencefile → software/citation → push reports → distcp."""
 
     hadoop_user_conf = {
         "spark.driverEnv.HADOOP_USER_NAME":              "{{ params.get('HADOOP_USER_NAME') }}",
@@ -468,10 +439,6 @@ def primary_export():
         task_id="decision_software_exporter",
         python_callable=_decision_software_exporter,
     )
-    decision_patent = BranchPythonOperator(
-        task_id="decision_patent_exporter",
-        python_callable=_decision_patent_exporter,
-    )
     decision_citation = BranchPythonOperator(
         task_id="decision_citation_relation_exporter",
         python_callable=_decision_citation_relation_exporter,
@@ -500,31 +467,7 @@ def primary_export():
     )
 
     # ---------------------------------------------------------------------- #
-    # 3. patent_exporter (Spark)                                              #
-    #    Oozie sub-workflow: export_patent                                     #
-    # ---------------------------------------------------------------------- #
-    patent_exporter = generate_spark_operator(
-        task_id="patent_exporter",
-        task_display_name="Export patent entities and relations (PatentExporterJob)",
-        jar="{{ params.get('JAR') }}",
-        image="{{ params.get('SPARK_IMAGE') }}",
-        main_class=_PATENT_EXPORTER_CLASS,
-        arguments=[
-            "-inputDocumentToPatentPath", "{{ params.get('input_document_to_patent') }}",
-            "-inputPatentPath",           "{{ params.get('input_patent') }}",
-            "-trustLevelThreshold",       "{{ params.get('trust_level_threshold_document_patent') }}",
-            "-collectedFromKey",          "{{ params.get('collectedfrom_key') }}",
-            "-patentDateOfCollection",    "{{ params.get('patent_date_of_collection') }}",
-            "-patentEpoUrlRoot",          "{{ params.get('patent_epo_url_root') }}",
-            "-outputRelationPath",        "{{ params.get('output') }}/document_patent/{{ params.get('action_set_id_document_patent') }}",
-            "-outputEntityPath",          "{{ params.get('output') }}/entities_patent/{{ params.get('action_set_id_entity_patent') }}",
-            "-outputReportPath",          "{{ params.get('output_report_root_path') }}/export_patent",
-        ],
-        spark_extra_conf=export_spark_conf,
-    )
-
-    # ---------------------------------------------------------------------- #
-    # 4. citation_relation_exporter (Spark)                                   #
+    # 3. citation_relation_exporter (Spark)                                   #
     #    Oozie sub-workflow: export_citation_relation                          #
     # ---------------------------------------------------------------------- #
     citation_relation_exporter = generate_spark_operator(
@@ -548,7 +491,7 @@ def primary_export():
     # ---------------------------------------------------------------------- #
     export_join = EmptyOperator(
         task_id="export_join",
-        task_display_name="Join software/patent/citation exporters",
+        task_display_name="Join software/citation exporters",
         trigger_rule="none_failed",
     )
 
@@ -687,13 +630,10 @@ echo "[DONE] Reports pushed successfully"
     # ---------------------------------------------------------------------- #
     # Wiring (Oozie: start → sequencefile → fork/join → push_reports → distcp)
     # ---------------------------------------------------------------------- #
-    export_sequencefile >> [decision_software, decision_patent, decision_citation]
+    export_sequencefile >> [decision_software, decision_citation]
 
     decision_software >> [software_exporter, export_join]
     software_exporter >> export_join
-
-    decision_patent >> [patent_exporter, export_join]
-    patent_exporter >> export_join
 
     decision_citation >> [citation_relation_exporter, export_join]
     citation_relation_exporter >> export_join
