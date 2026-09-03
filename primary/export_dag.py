@@ -84,10 +84,14 @@ _UNDEFINED = "$UNDEFINED$"
 # Branching helpers (equivalent of the Oozie <decision> nodes)
 # --------------------------------------------------------------------------- #
 def _decision_software_exporter(params):
-    """software exporter runs only when flag is set AND input path was defined."""
+    """software exporter runs only when the flag is set AND both its required
+    inputs (document-to-software-url and document metadata) are defined."""
     active = params.get("active_export_software")
-    input_path = params.get("input_document_to_software_url")
-    if str(active).lower() == "true" and input_path and input_path != _UNDEFINED:
+    input_rel = params.get("input_document_to_software_url")
+    input_meta = params.get("input_document_metadata")
+    if (str(active).lower() == "true"
+            and input_rel and input_rel != _UNDEFINED
+            and input_meta and input_meta != _UNDEFINED):
         return ["software_exporter"]
     return ["export_join"]
 
