@@ -331,6 +331,29 @@ def _decision_distcp(params):
         # ------------------------------------------------------------------ #
         "sparkDriverMemory": Param(default="10g", type="string"),
         "sparkExecutorMemory": Param(default="10g", type="string"),
+        "sparkDefaultParallelism": Param(
+            default="2560",
+            type="string",
+            description="Default number of partitions for RDD shuffle stages (join/groupByKey). "
+                        "Mirrors the Hadoop cluster's spark.default.parallelism, which spreads "
+                        "each shuffle over many small reduce tasks. When this is left at the "
+                        "Spark default (derived from a few large input files), a handful of huge "
+                        "reduce partitions form and SizeEstimator OOMs inside CoGroupedRDD "
+                        "(SoftwareExporterJob). Set to ~2-3x the total executor cores "
+                        "(the Hadoop cluster uses 2560 for 1280 vcores).",
+        ),
+        "sparkMemoryFraction": Param(
+            default="0.8",
+            type="string",
+            description="Fraction of (heap - 300MB) used for execution and storage "
+                        "(spark.memory.fraction); matches the Hadoop cluster tuning.",
+        ),
+        "sparkStorageFraction": Param(
+            default="0.3",
+            type="string",
+            description="Fraction of the memory region kept for storage vs execution "
+                        "(spark.memory.storageFraction); matches the Hadoop cluster tuning.",
+        ),
 
         # ------------------------------------------------------------------ #
         #  Utility pod (push_reports) HDFS access                             #
@@ -367,6 +390,12 @@ def primary_export():
     export_spark_conf = {
         "spark.driver.memory":   "{{ params.get('sparkDriverMemory') }}",
         "spark.executor.memory": "{{ params.get('sparkExecutorMemory') }}",
+        # High shuffle parallelism is what makes these groupByKey/join exporters succeed on
+        # the Hadoop cluster (spark.default.parallelism set cluster-wide). Without it the
+        # shuffle reduces to a handful of huge partitions → SizeEstimator OOM in CoGroupedRDD.
+        "spark.default.parallelism":    "{{ params.get('sparkDefaultParallelism') }}",
+        "spark.memory.fraction":        "{{ params.get('sparkMemoryFraction') }}",
+        "spark.memory.storageFraction": "{{ params.get('sparkStorageFraction') }}",
         **hadoop_user_conf,
     }
 
