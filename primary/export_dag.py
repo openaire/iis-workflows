@@ -315,6 +315,15 @@ def _decision_distcp(params):
         # ------------------------------------------------------------------ #
         "sparkDriverMemory": Param(default="10g", type="string"),
         "sparkExecutorMemory": Param(default="10g", type="string"),
+        "sparkExecutorCores": Param(
+            default="4",
+            type="string",
+            description="Number of cores (and thus concurrent tasks) per executor. "
+                        "Kept at 4 to mirror the Hadoop cluster where this job succeeds: with a "
+                        "10g heap and 24 cores each task gets only ~0.4g, while with 4 cores it "
+                        "gets ~2.5g (YARN ran 7g/4 ≈ 1.75g per task). Too-low memory per task "
+                        "makes SizeEstimator/aggregates OOM even though each shuffle read is tiny.",
+        ),
         "sparkDefaultParallelism": Param(
             default="2560",
             type="string",
@@ -374,6 +383,9 @@ def primary_export():
     export_spark_conf = {
         "spark.driver.memory":   "{{ params.get('sparkDriverMemory') }}",
         "spark.executor.memory": "{{ params.get('sparkExecutorMemory') }}",
+        # Cores per executor control how many tasks share the executor heap concurrently.
+        # Defaulting to 4 mirrors the Hadoop cluster (24 cores in k8s starves each task of heap).
+        "spark.executor.cores": "{{ params.get('sparkExecutorCores') }}",
         # High shuffle parallelism is what makes these groupByKey/join exporters succeed on
         # the Hadoop cluster (spark.default.parallelism set cluster-wide). Without it the
         # shuffle reduces to a handful of huge partitions → SizeEstimator OOM in CoGroupedRDD.
