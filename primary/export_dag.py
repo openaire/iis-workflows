@@ -22,8 +22,9 @@ Airflow mapping
   * primary_export_push_reports        → KubernetesPodOperator running
         `ProcessWrapper` around `eu.dnetlib.iis.wf.report.pushgateway.process.PushMetricsProcess`
         (same generic ProcessWrapper pattern as spark_referenceextraction_generic_builder_dag.py).
-  * distcp_output                      → Hadoop distcp launched via spark-submit
-        using a helper/entry main class (default `org.apache.hadoop.tools.DistCp`).
+  * distcp_output                      → triggers the standalone `spark_distcp` DAG
+        (SparkDistCP, main class com.coxautodata.SparkDistCP from the DHP shaded JAR)
+        to copy the export output to the remote location.
 
 A single uber JAR (`iis-wf-primary`) is referenced by every Spark/Java task, so
 the class of each exporter (SequenceFileExporterJob, SoftwareExporterJob,
@@ -66,6 +67,7 @@ default_args = {
 # Job entry-point classes (all resolved from the single iis-wf-primary uber JAR)
 # --------------------------------------------------------------------------- #
 _SEQUENCEFILE_DAG_ID = "spark_sequencefile_exporter"
+_DISTCP_DAG_ID = "spark_distcp"
 
 _SOFTWARE_EXPORTER_CLASS = (
     "eu.dnetlib.iis.wf.export.actionmanager.entity.software.SoftwareExporterJob"
@@ -160,12 +162,6 @@ def _decision_distcp(params):
             type="string",
             description="Optional remote HDFS location where the whole {output} directory is "
                         "distcped as sequence files. Leave as $UNDEFINED$ to skip the distcp step.",
-        ),
-        "output_remote_distcp_memory_mb": Param(
-            default="6144",
-            type="string",
-            description="Map task memory (MB) used by the distcp job "
-                        "(oozie: output_remote_distcp_memory_mb).",
         ),
 
         # ------------------------------------------------------------------ #
@@ -312,18 +308,6 @@ def _decision_distcp(params):
             default="prometheus.openaire.eu:9091",
             type="string",
             description="Pushgateway service location (host:port) receiving the prometheus metrics.",
-        ),
-
-        # ------------------------------------------------------------------ #
-        #  Distcp                                                             #
-        # ------------------------------------------------------------------ #
-        "DISTCP_MAIN_CLASS": Param(
-            default="org.apache.hadoop.tools.DistCp",
-            type="string",
-            description="Entry/helper main class used to run the Hadoop distcp tool via spark-submit. "
-                        "Defaults to the distcp tool itself. Override with "
-                        "eu.dnetlib.dhp.oozie.RunJavaSparkJob (or any wrapper whose main() forwards "
-                        "distcp-style args) when the DHP wrapper must bootstrap the driver first.",
         ),
 
         # ------------------------------------------------------------------ #
@@ -627,35 +611,28 @@ echo "[DONE] Reports pushed successfully"
         is_delete_operator_pod=True,
     )
 
-    # 6. distcp_output — Hadoop distcp launched via spark-submit (helper main class)
+    # 6. distcp_output — copies the export output to the remote location by triggering
+    #    the standalone `spark_distcp` DAG (SparkDistCP / com.coxautodata.SparkDistCP).
     decision_distcp = BranchPythonOperator(
         task_id="decision_distcp",
         python_callable=_decision_distcp,
     )
 
-    distcp_output = generate_spark_operator(
+    distcp_output = TriggerDagRunOperator(
         task_id="distcp_output",
-        task_display_name="Distcp export output to the remote location",
-        jar="{{ params.get('JAR') }}",
-        image="{{ params.get('SPARK_IMAGE') }}",
-        # Entry/helper main class running the Hadoop distcp tool. Defaults to the
-        # distcp tool itself; set to eu.dnetlib.dhp.oozie.RunJavaSparkJob (or any
-        # wrapper whose main() forwards distcp-style args) when a DHP wrapper must
-        # bootstrap the driver first.
-        main_class="{{ params.get('DISTCP_MAIN_CLASS') }}",
-        arguments=[
-            "-Dmapreduce.map.memory.mb={{ params.get('output_remote_distcp_memory_mb') }}",
-            "-pb",
-            "-overwrite",
-            "{{ params.get('output') }}",
-            "{{ params.get('output_remote_location') }}",
-        ],
-        spark_extra_conf={
-            **export_spark_conf,
-            "spark.dynamicAllocation.enabled": "false",
-            "spark.dynamicAllocation.minExecutors": "0",
-            "spark.dynamicAllocation.maxExecutors": "1",
+        task_display_name="Copy export output to remote location (spark_distcp)",
+        trigger_dag_id=_DISTCP_DAG_ID,
+        conf={
+            # mirror the original Oozie distcp (-overwrite) semantics
+            "FROM": ["{{ params.get('output') }}"],
+            "TO": "{{ params.get('output_remote_location') }}",
+            "OVERWRITE": True,
         },
+        wait_for_completion=True,
+        deferrable=False,
+        poke_interval=60,
+        allowed_states=["success"],
+        failed_states=["failed"],
     )
 
     end = EmptyOperator(task_id="end", task_display_name="Export finished")
