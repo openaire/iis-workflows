@@ -33,12 +33,12 @@ default_args = {
     default_args=default_args,
     params={
         "JAR_METADATAEXTRACTION": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20260826.112713-12-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20260910.142228-13-uber.jar",
             type='string',
             description="iis-wf-metadataextraction uber jar containing JsonReferenceParserJob"
         ),
         "JAR_EXPORT": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-export-actionmanager/1.3.0-SNAPSHOT/iis-wf-export-actionmanager-1.3.0-20260731.124621-2-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-export-actionmanager/1.3.0-SNAPSHOT/iis-wf-export-actionmanager-1.3.0-20260911.104323-11-uber.jar",
             type='string',
             description="iis-wf-export-actionmanager uber jar containing CrossrefExporterJob"
         ),
@@ -54,28 +54,28 @@ default_args = {
         # --- I/O paths ---
 
         "inputJsonPath": Param(
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/user/marek.horst/crossrefMuteCitations/medium",
+            default="hdfs://nameservice1/user/marek.horst/crossrefMuteCitations/medium",
             type="string",
             description="Input HDFS path with gzip-compressed JSON packages "
                         "(one JSON record per line with id and ref fields)",
         ),
         "outputAvroPath": Param(
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/marek.horst/crossref_mute_citations/output_avro",
+            default="hdfs://nameservice1/tmp/marek.horst/crossref_mute_citations/output_avro",
             type="string",
             description="Output Avro path for parsed ExtractedDocumentMetadata records",
         ),
         "outputEntityPath": Param(
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/marek.horst/crossref_mute_citations/output_entities",
+            default="hdfs://nameservice1/tmp/marek.horst/crossref_mute_citations/output_entities",
             type="string",
             description="Output path for exported AtomicAction<Publication> sequence files",
         ),
         "outputRelationPath": Param(
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/marek.horst/crossref_mute_citations/output_relations",
+            default="hdfs://nameservice1/tmp/marek.horst/crossref_mute_citations/output_relations",
             type="string",
             description="Output path for exported AtomicAction<Relation> sequence files",
         ),
         "outputReportPath": Param(
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/marek.horst/crossref_mute_citations/reports",
+            default="hdfs://nameservice1/tmp/marek.horst/crossref_mute_citations/reports",
             type="string",
             description="Output Avro path for execution reports "
                         "(eu.dnetlib.iis.common.schemas.ReportEntry)",
