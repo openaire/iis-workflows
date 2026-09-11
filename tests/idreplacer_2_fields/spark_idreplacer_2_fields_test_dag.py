@@ -65,7 +65,7 @@ default_args = {
             description="Hadoop user name used when writing to / reading from HDFS",
         ),
         "workingDir": Param(
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/marek.horst/idreplacer-2-fields-test",
+            default="hdfs://nameservice1/tmp/marek.horst/idreplacer-2-fields-test",
             type="string",
             description="HDFS working directory for intermediate and output data",
         ),

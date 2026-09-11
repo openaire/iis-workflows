@@ -100,7 +100,7 @@ default_args = {
             description="HDFS user name",
         ),
         "HDFS_NAMENODE": Param(
-            "hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020",
+            "hdfs://nameservice1",
             type="string",
             description="Default HDFS NameNode URI (fs.defaultFS)",
         ),
@@ -119,14 +119,14 @@ default_args = {
         # ------------------------------------------------------------------ #
         "INPUT_PATH": Param(
             default=(
-                "hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/user/marek.horst/wf/referenceextraction/project/input_filter/working_dir/output_approved"
+                "hdfs://nameservice1/user/marek.horst/wf/referenceextraction/project/input_filter/working_dir/output_approved"
             ),
             type="string",
             description="HDFS input Avro path",
         ),
         "OUTPUT_PATH": Param(
             default=(
-                "hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/marek.horst/referenceextraction_sqlite_builder/default.db"
+                "hdfs://nameservice1/tmp/marek.horst/referenceextraction_sqlite_builder/default.db"
             ),
             type="string",
             description="HDFS output path for the SQLite database file",

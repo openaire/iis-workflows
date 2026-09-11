@@ -83,12 +83,12 @@ default_args = {
             description="Number of output Avro files emitted",
         ),
         "output": Param(
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/k8s-spark/affmatching/output",
+            default="hdfs://nameservice1/tmp/k8s-spark/affmatching/output",
             type="string",
             description="Output Avro path for matched organizations",
         ),
         "output_report_root_path": Param(
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/k8s-spark/affmatching/reports",
+            default="hdfs://nameservice1/tmp/k8s-spark/affmatching/reports",
             type="string",
             description="Output Avro path for final reports",
         ),

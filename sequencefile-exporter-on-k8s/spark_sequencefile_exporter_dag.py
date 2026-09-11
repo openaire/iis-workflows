@@ -163,7 +163,7 @@ _FACTORY_MATCHED_ORG             = "eu.dnetlib.iis.wf.export.actionmanager.modul
         # Output                                                               #
         # ------------------------------------------------------------------ #
         "output": Param(
-            default="hdfs://iis-cdh5-test-m2.ocean.icm.edu.pl:8020/tmp/marek.horst/export_actionmanager/output",
+            default="hdfs://nameservice1/tmp/marek.horst/export_actionmanager/output",
             type="string",
             description="Base HDFS output directory. Each export action writes to a dedicated "
                         "subdirectory under this path: {output}/{type}/{action_set_id}.",

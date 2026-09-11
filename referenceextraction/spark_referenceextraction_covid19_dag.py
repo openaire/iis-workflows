@@ -66,13 +66,13 @@ default_args = {
                         "(eu.dnetlib.iis.transformers.metadatamerger.schemas.ExtractedDocumentMetadataMergedWithOriginal)",
         ),
         "outputAvroPath": Param(
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/marek.horst/referenceextraction_covid19/output",
+            default="hdfs://nameservice1/tmp/marek.horst/referenceextraction_covid19/output",
             type="string",
             description="Output Avro path for matched documents "
                         "(eu.dnetlib.iis.referenceextraction.covid19.schemas.MatchedDocument)",
         ),
         "outputReportPath": Param(
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/marek.horst/referenceextraction_covid19/reports",
+            default="hdfs://nameservice1/tmp/marek.horst/referenceextraction_covid19/reports",
             type="string",
             description="Output Avro path for execution reports (eu.dnetlib.iis.common.schemas.ReportEntry)",
         ),
@@ -138,7 +138,7 @@ JAR_FILENAME=$(basename "$JAR_URL")
 
 # Versioned HDFS parent derived from the JAR snapshot filename so every
 # distinct build lands in its own directory and re-runs are safe.
-SCRIPTS_HDFS_PARENT="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/airflow/iis/covid19-scripts/${JAR_FILENAME%.jar}"
+SCRIPTS_HDFS_PARENT="hdfs://nameservice1/tmp/airflow/iis/covid19-scripts/${JAR_FILENAME%.jar}"
 SCRIPTS_HDFS_PATH="${SCRIPTS_HDFS_PARENT}/scripts"
 
 TMP_DIR=$(mktemp -d)

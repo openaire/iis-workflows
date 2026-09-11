@@ -146,13 +146,13 @@ def _decision_distcp(params):
         # Note: mirrors Oozie `${workingDir}/output`; every exporter writes into it and
         # the final distcp copies the whole directory to the remote location.
         "output": Param(
-            default="hdfs://iis-cdh5-test-m2.ocean.icm.edu.pl:8020/tmp/marek.horst/primary_export/output",
+            default="hdfs://nameservice1/tmp/marek.horst/primary_export/output",
             type="string",
             description="Root output HDFS directory. Each export action writes to a dedicated "
                         "subdirectory under this path.",
         ),
         "output_report_root_path": Param(
-            default="hdfs://iis-cdh5-test-m2.ocean.icm.edu.pl:8020/tmp/marek.horst/primary_export/reports",
+            default="hdfs://nameservice1/tmp/marek.horst/primary_export/reports",
             type="string",
             description="Base HDFS directory where per-exporter reports are stored and from which "
                         "metrics are pushed to the pushgateway.",
@@ -352,7 +352,7 @@ def _decision_distcp(params):
         #  Utility pod (push_reports) HDFS access                             #
         # ------------------------------------------------------------------ #
         "HDFS_NAMENODE": Param(
-            default="hdfs://iis-cdh5-test-m2.ocean.icm.edu.pl:8020",
+            default="hdfs://nameservice1",
             type="string",
             description="HDFS NameNode URI used to generate a minimal core-site.xml when the "
                         "utility pod has no Hadoop config mounted (fs.defaultFS).",

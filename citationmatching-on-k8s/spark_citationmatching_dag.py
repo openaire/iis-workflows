@@ -57,24 +57,24 @@ default_args = {
             description="Input Avro path with already matched citations to be excluded from processing",
         ),
         "workingDir": Param(
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/marek.horst/citationmatching/workingDir",
+            default="hdfs://nameservice1/tmp/marek.horst/citationmatching/workingDir",
             type="string",
             description="Working directory for intermediate results",
         ),
         "output_citations": Param(
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/k8s-spark/citation_matching/output",
+            default="hdfs://nameservice1/tmp/k8s-spark/citation_matching/output",
             type="string",
             description="Output Avro path for matched citations (eu.dnetlib.iis.common.citations.schemas.Citation)",
         ),
         "output_report_root_path": Param(
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/k8s-spark/citation_matching/reports",
+            default="hdfs://nameservice1/tmp/k8s-spark/citation_matching/reports",
             type="string",
             description="Output Avro path for final reports",
         ),
 
         # --- Cache settings ---
         "cacheRootDir": Param(
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/marek.horst/citationmatching/cache",
+            default="hdfs://nameservice1/tmp/marek.horst/citationmatching/cache",
             type="string",
             description="Citation matching cache root directory",
         ),

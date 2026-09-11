@@ -60,14 +60,14 @@ default_args = {
         "output": Param(
             # default="hdfs://nameservice1/tmp/k8s-spark/citation_matching_direct/output",
             # notice we need to reference it with an explicit name node name
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/k8s-spark/citation_matching_direct/output",
+            default="hdfs://nameservice1/tmp/k8s-spark/citation_matching_direct/output",
             type="string",
             description="Output Avro path for matched citations",
         ),
         "output_report_root_path": Param(
             # default="hdfs://nameservice1/tmp/k8s-spark/citation_matching_direct/reports",
             # notice we need to reference it with an explicit name node name
-            default="hdfs://iis-cdh5-test-m1.ocean.icm.edu.pl:8020/tmp/k8s-spark/citation_matching_direct/reports",
+            default="hdfs://nameservice1/tmp/k8s-spark/citation_matching_direct/reports",
             type="string",
             description="Output Avro path for final reports",
         ),
