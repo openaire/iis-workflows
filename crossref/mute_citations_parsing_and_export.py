@@ -126,6 +126,13 @@ default_args = {
             type="string",
             description="Memory per Spark executor",
         ),
+        "sparkExecutorMemoryOverhead": Param(
+            default="2048",
+            type="string",
+            description="Off-heap memory overhead per Spark executor in MiB. Overrides the very "
+                        "large value predefined for the environment; ~2 GiB is comfortable for "
+                        "the 10g executor heap of this JVM-only job",
+        ),
         "sparkExecutorInstances": Param(
             default=8,
             type="integer",
@@ -180,6 +187,9 @@ def mute_citations_parsing_and_export():
         spark_extra_conf={
             "spark.driver.memory":   "{{ params.get('sparkDriverMemory') }}",
             "spark.executor.memory": "{{ params.get('sparkExecutorMemory') }}",
+            # the environment predefines a very large executor memory overhead which would
+            # waste cluster memory, so it is overridden with an explicit, tunable value
+            "spark.executor.memoryOverhead": "{{ params.get('sparkExecutorMemoryOverhead') }}",
             # predictable concurrency to Grobid: fixed executor count/cores and
             # dynamic allocation off, so in-flight requests ≈ executors × cores
             "spark.executor.instances": "{{ params.get('sparkExecutorInstances') }}",
@@ -213,6 +223,7 @@ def mute_citations_parsing_and_export():
         spark_extra_conf={
             "spark.driver.memory":   "{{ params.get('sparkDriverMemory') }}",
             "spark.executor.memory": "{{ params.get('sparkExecutorMemory') }}",
+            "spark.executor.memoryOverhead": "{{ params.get('sparkExecutorMemoryOverhead') }}",
             "spark.driverEnv.HADOOP_USER_NAME":          "{{ params.get('HADOOP_USER_NAME') }}",
             "spark.executorEnv.HADOOP_USER_NAME":        "{{ params.get('HADOOP_USER_NAME') }}",
             "spark.driverEnv.SPARK_USER":                "{{ params.get('HADOOP_USER_NAME') }}",
