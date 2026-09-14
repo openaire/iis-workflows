@@ -33,12 +33,12 @@ default_args = {
     default_args=default_args,
     params={
         "JAR_METADATAEXTRACTION": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20260910.142228-13-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20260914.154251-14-uber.jar",
             type='string',
             description="iis-wf-metadataextraction uber jar containing JsonReferenceParserJob"
         ),
         "JAR_EXPORT": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-export-actionmanager/1.3.0-SNAPSHOT/iis-wf-export-actionmanager-1.3.0-20260911.104323-11-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-export-actionmanager/1.3.0-SNAPSHOT/iis-wf-export-actionmanager-1.3.0-20260915.112346-12-uber.jar",
             type='string',
             description="iis-wf-export-actionmanager uber jar containing CrossrefExporterJob"
         ),
@@ -79,6 +79,34 @@ default_args = {
             type="string",
             description="Output Avro path for execution reports "
                         "(eu.dnetlib.iis.common.schemas.ReportEntry)",
+        ),
+        "outputFaultPath": Param(
+            default="hdfs://nameservice1/tmp/marek.horst/crossref_mute_citations/output_fault",
+            type="string",
+            description="Output Avro path for faults (eu.dnetlib.iis.audit.schemas.Fault) "
+                        "reported for the documents which could not be processed",
+        ),
+
+        # --- Cache settings ---
+        "cacheRootDir": Param(
+            default="hdfs://nameservice1/tmp/marek.horst/crossref_mute_citations/cache",
+            type="string",
+            description="Reference parsing cache root directory. Parsed documents are cached and "
+                        "identified with ExtractedDocumentMetadata#id, so the job can be rerun "
+                        "incrementally and only the documents which are not cached yet are parsed",
+        ),
+        "lockManagerFactoryClassName": Param(
+            default="eu.dnetlib.iis.common.lock.HadoopFsLockManagerFactory",
+            type="string",
+            description="Lock manager factory class name for synchronizing access to the cache directory. "
+                        "HadoopFsLockManagerFactory uses a sentinel file on the target storage (HDFS/S3/Ceph) "
+                        "and requires no external coordination service. "
+                        "Use eu.dnetlib.iis.common.lock.ZookeeperLockManagerFactory for legacy Hadoop HA clusters.",
+        ),
+        "numberOfEmittedFiles": Param(
+            default="1000",
+            type="string",
+            description="Number of files created by the parse task at output and in cache",
         ),
 
         # --- Algorithm parameters ---
@@ -122,7 +150,7 @@ default_args = {
             description="Memory for the Spark driver",
         ),
         "sparkExecutorMemory": Param(
-            default="10g",
+            default="5g",
             type="string",
             description="Memory per Spark executor",
         ),
@@ -167,7 +195,11 @@ def mute_citations_parsing_and_export():
         arguments=[
             "-inputPath",       "{{ params.get('inputJsonPath') }}",
             "-outputPath",      "{{ params.get('outputAvroPath') }}",
+            "-outputFaultPath", "{{ params.get('outputFaultPath') }}",
             "-outputReportPath","{{ params.get('outputReportPath') }}/parse",
+            "-cacheRootDir",    "{{ params.get('cacheRootDir') }}",
+            "-lockManagerFactoryClassName", "{{ params.get('lockManagerFactoryClassName') }}",
+            "-numberOfEmittedFiles", "{{ params.get('numberOfEmittedFiles') }}",
             "-extractedBy",     "{{ params.get('extractedBy') }}",
             "-referenceParser", "{{ params.get('referenceParser') }}",
             "-grobidServerUrl", "{{ params.get('grobidServerUrl') }}",
