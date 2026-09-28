@@ -38,7 +38,7 @@ default_args = {
             description="iis-wf-metadataextraction uber jar containing JsonReferenceParserJob"
         ),
         "JAR_EXPORT": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-export-actionmanager/1.3.0-SNAPSHOT/iis-wf-export-actionmanager-1.3.0-20260915.112346-12-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-export-actionmanager/1.3.0-SNAPSHOT/iis-wf-export-actionmanager-1.3.0-20260928.145605-13-uber.jar",
             type='string',
             description="iis-wf-export-actionmanager uber jar containing CrossrefExporterJob"
         ),
