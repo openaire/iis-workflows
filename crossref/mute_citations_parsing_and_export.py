@@ -38,7 +38,7 @@ default_args = {
             description="iis-wf-metadataextraction uber jar containing JsonReferenceParserJob"
         ),
         "JAR_EXPORT": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-export-actionmanager/1.3.0-SNAPSHOT/iis-wf-export-actionmanager-1.3.0-20260928.145605-13-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-export-actionmanager/1.3.0-SNAPSHOT/iis-wf-export-actionmanager-1.3.0-20260930.093533-15-uber.jar",
             type='string',
             description="iis-wf-export-actionmanager uber jar containing CrossrefExporterJob"
         ),
@@ -164,19 +164,21 @@ default_args = {
         "sparkExecutorInstances": Param(
             default=8,
             type="integer",
-            description="Number of Spark executors for the parse task "
-                        "(total in-flight Grobid requests ≈ executors × cores)",
+            description="Number of Spark executors used by both tasks "
+                        "(for the parse task the total in-flight Grobid requests ≈ executors × cores)",
         ),
         "sparkExecutorCores": Param(
             default=2,
             type="integer",
-            description="CPU cores per Spark executor for the parse task",
+            description="CPU cores per Spark executor",
         ),
         "sparkDynamicAllocation": Param(
             default=False,
             type="boolean",
-            description="Enable Spark dynamic allocation for the parse task "
-                        "(recommended False so Grobid concurrency is predictable)",
+            description="Enable Spark dynamic allocation. Recommended False: it keeps the Grobid "
+                        "concurrency of the parse task predictable and keeps the executors of the "
+                        "export task alive between its actions, so the payloads it materializes are "
+                        "not lost (and the export is not recomputed) for every action",
         ),
     },
     tags=["openaire", "iis", "crossref", "mutecitation"],
@@ -252,10 +254,23 @@ def mute_citations_parsing_and_export():
             "-outputRelationPath", "{{ params.get('outputRelationPath') }}",
             "-outputReportPath",  "{{ params.get('outputReportPath') }}/export",
         ],
+        # the export job materializes the serialized payloads once and feeds both outputs and the
+        # report counters from that materialization: executors must stay around between those
+        # actions, otherwise the cached payloads are lost and the whole export is recomputed for
+        # every action (the operator's defaulting webhook would enable dynamic allocation)
+        dynamic_allocation={
+            "enabled": "{{ 'true' if params.get('sparkDynamicAllocation') else 'false' }}",
+            "minExecutors": "1",
+            "maxExecutors": "{{ params.get('sparkExecutorInstances') }}",
+            "shuffleTrackingEnabled": "{{ 'true' if params.get('sparkDynamicAllocation') else 'false' }}",
+        },
         spark_extra_conf={
             "spark.driver.memory":   "{{ params.get('sparkDriverMemory') }}",
             "spark.executor.memory": "{{ params.get('sparkExecutorMemory') }}",
             "spark.executor.memoryOverhead": "{{ params.get('sparkExecutorMemoryOverhead') }}",
+            "spark.executor.instances": "{{ params.get('sparkExecutorInstances') }}",
+            "spark.executor.cores":     "{{ params.get('sparkExecutorCores') }}",
+            "spark.dynamicAllocation.enabled": "{{ 'true' if params.get('sparkDynamicAllocation') else 'false' }}",
             "spark.driverEnv.HADOOP_USER_NAME":          "{{ params.get('HADOOP_USER_NAME') }}",
             "spark.executorEnv.HADOOP_USER_NAME":        "{{ params.get('HADOOP_USER_NAME') }}",
             "spark.driverEnv.SPARK_USER":                "{{ params.get('HADOOP_USER_NAME') }}",
