@@ -115,6 +115,18 @@ def _decision_copy_report(params):
         ),
         "input_table_name": Param(default="", type="string"),
         "hive_metastore_uris": Param(default="", type="string"),
+        "input_id_mapping": Param(
+            default=_UNDEFINED, type="string",
+            description="Id mappings (eu.dnetlib.iis.common.schemas.IdentifierMapping) used by the "
+                        "id-replacer to translate identifiers of deduplicated objects. "
+                        "$UNDEFINED$ → the transformers_idreplacer step is skipped.",
+        ),
+        "input_id": Param(
+            default=_UNDEFINED, type="string",
+            description="Identifiers existing in OA+ (eu.dnetlib.iis.common.schemas.Identifier) used "
+                        "by the existence filter to drop contents without metadata representatives. "
+                        "$UNDEFINED$ → the transformers_common_existencefilter step is skipped.",
+        ),
         "mimetypes_pdf": Param(default="pdf,application/pdf", type="string"),
         "mimetypes_html": Param(default="text/html", type="string"),
         "mimetypes_xml_pmc": Param(default="xml,application/xml", type="string"),
@@ -218,6 +230,9 @@ def metadataextraction_cache_builder():
             "HADOOP_USER_NAME":  "{{ params.get('HADOOP_USER_NAME') }}",
             "input_table_name":  "{{ params.get('input_table_name') }}",
             "hive_metastore_uris": "{{ params.get('hive_metastore_uris') }}",
+            # optional transformations of the content url chain
+            "input_id_mapping":  "{{ params.get('input_id_mapping') }}",
+            "input_id":          "{{ params.get('input_id') }}",
             "mimetypes_pdf":     "{{ params.get('mimetypes_pdf') }}",
             "mimetypes_html":    "{{ params.get('mimetypes_html') }}",
             "mimetypes_xml_pmc": "{{ params.get('mimetypes_xml_pmc') }}",

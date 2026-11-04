@@ -97,3 +97,32 @@ All Spark tasks share the established conventions of this repository:
 * Cache handling relies on `-cacheRootDir` + `-lockManagerFactoryClassName`
   (`HadoopFsLockManagerFactory` requires no external coordination service; use
   `ZookeeperLockManagerFactory` only for legacy Hadoop HA clusters).
+
+## Optional content-url transformations (`input_id_mapping` / `input_id`)
+
+These two parameters are *not* declared by the Oozie `cache/builder` workflow itself — they were
+forwarded from the parent (primary) workflow via `<propagate-configuration/>` into the
+`import_content_url` sub-workflow, which is consumed by the `importer/content_url/chain` workflow.
+In the Airflow port they are declared on the **builder** DAG and forwarded to the
+`spark_content_url_chain` DAG through `TriggerDagRunOperator.conf`:
+
+| Parameter | Consumed by | Spark job | Datastore |
+|---|---|---|---|
+| `input_id_mapping` | `transformers_idreplacer` | `IdReplacerJob` (`-inputIdMapping`) | `eu.dnetlib.iis.common.schemas.IdentifierMapping` |
+| `input_id` | `transformers_common_existencefilter` | `ExistenceFilterJob` (`-inputExistentId`) | `eu.dnetlib.iis.common.schemas.Identifier` |
+
+Both default to `$UNDEFINED$`; when left undefined the corresponding step is skipped
+(`BranchPythonOperator` decisions in `spark_content_url_chain`), exactly as in Oozie.
+
+To provide them, override the params when triggering the builder DAG, e.g.:
+
+```json
+{
+  "input_id_mapping": "hdfs://nameservice1/user/dnet.production/iis/working_dirs/primary/id_mapping",
+  "input_id": "hdfs://nameservice1/user/dnet.production/iis/working_dirs/primary/existent_id"
+}
+```
+
+Note the mapping direction: **`input_id_mapping` belongs to the id-replacer** and
+**`input_id` belongs to the existence filter** (the description in the original task statement had
+them the other way round).
