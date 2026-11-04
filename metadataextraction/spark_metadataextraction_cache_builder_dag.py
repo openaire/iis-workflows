@@ -85,22 +85,22 @@ def _decision_copy_report(params):
     params={
         # ---------------- artifacts / runtime ----------------
         "JAR_METADATAEXTRACTION": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20261104.164632-18-uber.jar",
             type="string",
             description="iis-wf-metadataextraction uber JAR (cache chain job incl. metadata extractor)",
         ),
         "JAR_TRANSFORMERS": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-transformers/1.3.0-SNAPSHOT/iis-wf-transformers-1.3.0-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-transformers/1.3.0-SNAPSHOT/iis-wf-transformers-1.3.0-20261104.164945-19-uber.jar",
             type="string",
             description="iis-wf-transformers uber JAR (checksum preprocessing job)",
         ),
         "JAR_IMPORT": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-import/1.3.0-SNAPSHOT/iis-wf-import-1.3.0-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-import/1.3.0-SNAPSHOT/iis-wf-import-1.3.0-20261104.165042-11-uber.jar",
             type="string",
             description="iis-wf-import uber JAR (content url importer + content url chain)",
         ),
         "JAR_REPORT": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-report/1.3.0-SNAPSHOT/iis-wf-report-1.3.0-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-report/1.3.0-SNAPSHOT/iis-wf-report-1.3.0-20261104.165146-1-uber.jar",
             type="string",
             description="iis-wf-report uber JAR (ReportMerger)",
         ),
@@ -113,16 +113,18 @@ def _decision_copy_report(params):
             default="pdf", type="string",
             description="Import mode selecting the content url chain output subdirectory: pdf│xmlpmc",
         ),
-        "input_table_name": Param(default="", type="string"),
-        "hive_metastore_uris": Param(default="", type="string"),
+        "input_table_name": Param(default="pdfaggregation_i.payload", type="string"),
+        "hive_metastore_uris": Param(default="thrift://impala-cluster-mn3.openaire.eu:9083", type="string"),
         "input_id_mapping": Param(
-            default=_UNDEFINED, type="string",
+            default="/user/dnet.production/iis/working_dirs/primary/primary_import/metadataimport/identifiermapping", 
+            type="string",
             description="Id mappings (eu.dnetlib.iis.common.schemas.IdentifierMapping) used by the "
                         "id-replacer to translate identifiers of deduplicated objects. "
                         "$UNDEFINED$ → the transformers_idreplacer step is skipped.",
         ),
         "input_id": Param(
-            default=_UNDEFINED, type="string",
+            default="/user/dnet.production/iis/working_dirs/primary/primary_import/working_dir/transformers_idextractor/output", 
+            type="string",
             description="Identifiers existing in OA+ (eu.dnetlib.iis.common.schemas.Identifier) used "
                         "by the existence filter to drop contents without metadata representatives. "
                         "$UNDEFINED$ → the transformers_common_existencefilter step is skipped.",
@@ -159,8 +161,8 @@ def _decision_copy_report(params):
         "content_read_timeout": Param(default="60000", type="string"),
         "log_fault_processing_time_threshold_secs": Param(default="60", type="string"),
         "interrupt_processing_time_threshold_secs": Param(default="120", type="string"),
-        "grobid_server_url": Param(default=_UNDEFINED, type="string"),
-        "grobid_server_version": Param(default=_UNDEFINED, type="string"),
+        "grobid_server_url": Param(default="https://grobid.openaire-cloud.icm.edu.pl", type="string"),
+        "grobid_server_version": Param(default="0.9.1", type="string"),
         "grobid_server_connection_timeout": Param(default="600000", type="string"),
         "grobid_server_read_timeout": Param(default="600000", type="string"),
         "grobid_server_throttle_sleep_time": Param(default="60000", type="string"),

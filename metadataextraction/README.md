@@ -126,3 +126,48 @@ To provide them, override the params when triggering the builder DAG, e.g.:
 Note the mapping direction: **`input_id_mapping` belongs to the id-replacer** and
 **`input_id` belongs to the existence filter** (the description in the original task statement had
 them the other way round).
+
+## Building the uber JARs (`JAR_*` params)
+
+Every module referenced by a `JAR_*` param declares a `shade-uber-jar` Maven profile (the same
+profile that already existed in `iis-wf-transformers`), producing a `*-uber.jar` attached with the
+`uber` classifier:
+
+```bash
+cd ~/iis
+mvn package -Pshade-uber-jar -Dmaven.test.skip=true \
+  -pl iis-wf/iis-wf-import,iis-wf/iis-wf-transformers,iis-wf/iis-wf-metadataextraction,iis-wf/iis-wf-report
+```
+
+Artifacts:
+
+| Module | `JAR_*` param | Artifact |
+|---|---|---|
+| `iis-wf-import` | `JAR_IMPORT` | `iis-wf-import-<version>-uber.jar` |
+| `iis-wf-transformers` | `JAR_TRANSFORMERS` | `iis-wf-transformers-<version>-uber.jar` |
+| `iis-wf-metadataextraction` | `JAR_METADATAEXTRACTION` | `iis-wf-metadataextraction-<version>-uber.jar` |
+| `iis-wf-report` | `JAR_REPORT` | `iis-wf-report-<version>-uber.jar` |
+
+`spark`/`hadoop` dependencies are `provided`, so they are intentionally **not** bundled — the Spark
+image supplies them. With `shadedArtifactAttached=true`, `mvn install`/`deploy` publishes the uber
+artifact automatically.
+
+The shade profiles also apply the same exclusion filters as `iis-wf-primary` / `iis-wf-referenceextraction`:
+
+* `models/*.json` (AWS SDK v2 service models, ~0.5 GB raw)
+* `software.amazon.awssdk:*` (~1.8 GB raw)
+* `com.amazonaws:*` (~0.6 GB raw)
+* `software.amazon.s3.analyticsaccelerator:*`
+
+AWS SDK v1/v2 are provided at runtime by the `spark:4.1.2` image (built with `-Phadoop-cloud`,
+plus `hadoop-aws` in the bundled Hadoop distribution), so they must not be shipped in the uber JAR.
+Effect on artifact size:
+
+| Module | Before | After |
+|---|---|---|
+| `iis-wf-import` | ~1.1 GB | ~50 MB |
+| `iis-wf-metadataextraction` | ~1.1 GB | ~85 MB |
+| `iis-wf-report` | ~29 MB | ~29 MB (no AWS deps) |
+
+Note: `DocumentContentUrlBasedImporterJob` uses `com.amazonaws` classes directly. This works in the
+Spark image, but would fail if the JAR were run outside it (e.g. plain JRE pod without `hadoop-aws`).
