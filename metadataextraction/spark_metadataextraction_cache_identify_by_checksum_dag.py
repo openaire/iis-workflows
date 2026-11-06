@@ -124,8 +124,22 @@ _UNDEFINED = "$UNDEFINED$"
         "grobid_server_max_retries_count": Param(default="10", type="string"),
 
         # ---------------- object store content retrieval ----------------
-        "objectstore_s3_endpoint": Param(default=_UNDEFINED, type="string"),
-        "objectstore_s3_keystore_location": Param(default=_UNDEFINED, type="string"),
+        # Values taken from the original Oozie job.properties shipped with this workflow
+        # (iis-wf-metadataextraction/src/main/resources/.../cache/builder/job.properties).
+        # Without the endpoint, every s3:// content URL fails with
+        # S3EndpointNotFoundException ("no S3 client defined").
+        "objectstore_s3_endpoint": Param(
+            default="s3.icm.edu.pl",
+            type="string",
+            description="S3 (object store) service endpoint used to retrieve s3:// content URLs. "
+                        "Required whenever the imported urls point to the object store.",
+        ),
+        "objectstore_s3_keystore_location": Param(
+            default="jceks://hdfs/user/marek.horst/secrets/s3keyfile.jceks",
+            type="string",
+            description="Hadoop credential provider holding the fs.s3a.access.key / "
+                        "fs.s3a.secret.key entries. When missing, anonymous credentials are used.",
+        ),
 
         # ---------------- cache ----------------
         "cache_location": Param(

@@ -105,6 +105,31 @@ All Spark tasks share the established conventions of this repository:
 * `sparkDriverMemory` and `sparkExecutorMemory` default to `7g` on the same DAGs, matching the
   Hadoop cluster driver/executor memory (7g executor with 4 cores ≈ 1.75g per task).
 
+## Object store (S3) content retrieval
+
+`importer_content` downloads the PDFs referenced by `s3://…` content URLs, so it needs the object
+store endpoint and credentials. Both DAGs default to the values shipped with the original Oozie
+`cache/builder/job.properties`:
+
+| Param | Default | Job flag |
+|---|---|---|
+| `objectstore_s3_endpoint` | `s3.icm.edu.pl` | `-objectstoreS3Endpoint` |
+| `objectstore_s3_keystore_location` | `jceks://hdfs/user/marek.horst/secrets/s3keyfile.jceks` | `-objectstoreS3KeystoreLocation` |
+
+`objectstore_s3_keystore_location` becomes `hadoop.security.credential.provider.path`; the provider
+must expose the `fs.s3a.access.key` / `fs.s3a.secret.key` entries (see
+`HadoopBasedS3CredentialsProvider`). When they are not found the client **falls back to anonymous
+credentials**, which is why a broken keystore path shows up as every content being counted in
+`import.contents.pdf.invalid.unavailable` rather than as a hard failure.
+
+Note the keystore lives in the `marek.horst` HDFS home, matching the `HADOOP_USER_NAME` default.
+
+Because `ContentRetrievalContext` is created **inside the Spark task** with a fresh Hadoop
+`Configuration`, `DocumentContentUrlBasedImporterJob` copies the driver's Hadoop configuration into
+the job params and replays it there. Without that, `jceks://hdfs/…` would be resolved against the
+local filesystem (`fs.defaultFS` unset in the task JVM) and the credentials would silently be
+dropped.
+
 ## Optional content-url transformations (`input_id_mapping` / `input_id`)
 
 These two parameters are *not* declared by the Oozie `cache/builder` workflow itself — they were
@@ -165,12 +190,38 @@ The shade profiles also apply size filters for the AWS SDK v2 stack:
 * `software.amazon.awssdk:*` (~0.6 GB jar)
 * `software.amazon.s3.analyticsaccelerator:*`
 
-**AWS SDK v1 (`com.amazonaws:*`) must NOT be excluded.** `ObjectStoreContentProviderUtils` /
-`ContentRetrievalContext` / `HadoopBasedS3CredentialsProvider` use `com.amazonaws.*` directly for
-`s3://` content retrieval, and the `spark:4.1.2` image does **not** provide it (its bundled Hadoop
-uses AWS SDK v2). Excluding it caused, at runtime:
+### AWS SDK v1 (`com.amazonaws:*`) — module-specific policy
+
+The image does **not** provide AWS SDK v1 (its bundled Hadoop uses SDK v2), so it must be shipped by
+whichever JAR actually performs `s3://` content retrieval:
+
+| Module | SDK v1 in uber JAR | Why |
+|---|---|---|
+| `iis-wf-import` (`JAR_IMPORT`) | **bundled** | Runs `DocumentContentUrlBasedImporterJob`, which downloads the PDFs from the object store |
+| `iis-wf-metadataextraction` (`JAR_METADATAEXTRACTION`) | **excluded** | Only ever launches `MetadataExtractionCacheChainJob`; the extraction path never touches AWS |
+| `iis-wf-report` (`JAR_REPORT`) | n/a | No AWS code on its classpath at all |
+
+Excluding v1 from `iis-wf-import` caused, at runtime:
 `java.lang.NoClassDefFoundError: com/amazonaws/auth/AWSCredentialsProvider`.
-It is therefore bundled back into the uber JARs.
+
+Excluding it from `iis-wf-metadataextraction` is safe — verified, not assumed:
+
+1. **Source level** — zero `com.amazonaws` references in `iis-wf-metadataextraction/src` and in
+   `iis-common/src`. The only things this module takes from `iis-wf-import` are `HttpClientUtils`,
+   `ContentApprover`, `PDFHeaderBasedContentApprover`, `InvalidCountableContentApproverWrapper`, and
+   none of them references AWS.
+2. **Bytecode level** — scanning every `eu/dnetlib/**` class in the built uber JAR, the *only* IIS
+   classes referencing `com.amazonaws` are the three below, and **no class outside
+   `eu.dnetlib.iis.wf.importer.content` references any of them**:
+   `ContentRetrievalContext`, `ObjectStoreContentProviderUtils`, `HadoopBasedS3CredentialsProvider`.
+3. **Reachability** — the only references to those three come from `DocumentContentUrlBasedImporterJob`
+   (+ its `ContentRetrievalIterator`), `DocumentContentUrlBasedImporterMapper`,
+   `DocumentTextUrlBasedImporterMapper` and `ObjectStoreDocumentContentUrlImporterMapper` — i.e. the
+   content-importer entry points, which `JAR_METADATAEXTRACTION` never launches.
+
+Result: 362 MB → **85 MB**. The trade-off is that those importer classes stay in the JAR but become
+non-loadable; if this JAR is ever reused to run `DocumentContentUrlBasedImporterJob`, the filter must
+be removed.
 
 AWS SDK v2 and the S3 analytics accelerator are only needed by `hadoop-aws` (S3A paths), which the
 runtime image provides; the IIS code does not use them.
@@ -185,11 +236,11 @@ runtime image provides; the IIS code does not use them.
 | Supplied by | **the uber JAR** (bundled — see above) | the `spark:4.1.1` image (`-Phadoop-cloud` → `spark-hadoop-cloud_2.13-4.1.1.jar`) |
 | Used by the ported code | **Yes** — this is how PDFs are fetched for extraction | No (`grep s3a://` → 0 hits in IIS Java and in the DAGs; the only `fs.s3a.*` occurrences are two credential *key names* read by `HadoopBasedS3CredentialsProvider`) |
 
-So: content retrieval from the object store is entirely SDK v1 and is self-contained in the uber JAR.
-Excluding SDK v2 only affects S3A, which nothing uses yet. The full set of `com.amazonaws` classes
-referenced anywhere in the repo is 13, all in `importer/content`
+So: content retrieval from the object store is entirely SDK v1 and is self-contained in the
+`iis-wf-import` uber JAR. Excluding SDK v2 only affects S3A, which nothing uses yet. The full set of
+`com.amazonaws` usages in the repo is 3 classes, all in `importer/content`
 (`ContentRetrievalContext`, `HadoopBasedS3CredentialsProvider`, `ObjectStoreContentProviderUtils`),
-and all 13 are verifiably present in the rebuilt jar.
+and all of the referenced classes are verifiably present in the `iis-wf-import` jar.
 
 Gotcha: `s3://` is **not** a Hadoop scheme. Putting an object-store URL into a path param
 (`-input`, `-outputRoot`, `-cacheRootDir`, …) fails with *No FileSystem for scheme "s3"* — such paths
@@ -200,5 +251,5 @@ Effect on artifact size:
 | Module | Unfiltered | After filters |
 |---|---|---|
 | `iis-wf-import` | ~1.1 GB | ~327 MB (incl. AWS SDK v1) |
-| `iis-wf-metadataextraction` | ~1.1 GB | ~362 MB (incl. AWS SDK v1) |
+| `iis-wf-metadataextraction` | ~1.1 GB | **~85 MB** (AWS SDK v1 excluded) |
 | `iis-wf-report` | ~29 MB | ~29 MB (no AWS deps) |
