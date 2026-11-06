@@ -113,17 +113,17 @@ def _decision_copy_report(params):
             default="pdf", type="string",
             description="Import mode selecting the content url chain output subdirectory: pdf│xmlpmc",
         ),
-        "input_table_name": Param(default="pdfaggregation_i.payload", type="string"),
-        "hive_metastore_uris": Param(default="thrift://impala-cluster-mn3.openaire.eu:9083", type="string"),
+        "input_table_name": Param(default="payload_data.payload", type="string"),
+        "hive_metastore_uris": Param(default="thrift://iis-cdh5-test-m3.ocean.icm.edu.pl:9083", type="string"),
         "input_id_mapping": Param(
-            default="/user/dnet.production/iis/working_dirs/primary/primary_import/metadataimport/identifiermapping", 
+            default="hdfs://nameservice1/user/dnet.production/iis/working_dirs/primary/primary_import/metadataimport/identifiermapping", 
             type="string",
             description="Id mappings (eu.dnetlib.iis.common.schemas.IdentifierMapping) used by the "
                         "id-replacer to translate identifiers of deduplicated objects. "
                         "$UNDEFINED$ → the transformers_idreplacer step is skipped.",
         ),
         "input_id": Param(
-            default="/user/dnet.production/iis/working_dirs/primary/primary_import/working_dir/transformers_idextractor/output", 
+            default="hdfs://nameservice1/tmp/marek.horst/metadataextraction/input/pdf/micro", 
             type="string",
             description="Identifiers existing in OA+ (eu.dnetlib.iis.common.schemas.Identifier) used "
                         "by the existence filter to drop contents without metadata representatives. "
@@ -186,8 +186,27 @@ def _decision_copy_report(params):
         "HADOOP_CONF_DIR": Param(default="/opt/hadoop/etc/hadoop", type="string"),
 
         # ---------------- spark tuning ----------------
-        "sparkDriverMemory": Param(default="4g", type="string"),
-        "sparkExecutorMemory": Param(default="4g", type="string"),
+        "sparkDriverMemory": Param(
+            default="7g",
+            type="string",
+            description="Memory for the driver. 7g mirrors the Hadoop cluster default for these "
+                        "transformations.",
+        ),
+        "sparkExecutorMemory": Param(
+            default="7g",
+            type="string",
+            description="Memory per executor. 7g mirrors the Hadoop cluster default for these "
+                        "transformations (YARN ran 7g with 4 cores, ~1.75g per task).",
+        ),
+        "sparkExecutorCores": Param(
+            default="4",
+            type="string",
+            description="Number of cores (and thus concurrent tasks) per executor. "
+                        "The k8s cluster environment defaults to 24 cores, which starves each "
+                        "task of heap and makes the Celeborn shuffle writers OOM. "
+                        "Defaulting to 4 mirrors the Hadoop cluster where this workflow "
+                        "succeeded (24 cores in k8s starves each task of heap).",
+        ),
         "sparkExecutorOverhead": Param(default="1024", type="string"),
     },
     tags=["openaire", "iis", "metadataextraction", "cache"],
@@ -208,6 +227,11 @@ def metadataextraction_cache_builder():
     spark_conf = {
         "spark.driver.memory":           "{{ params.get('sparkDriverMemory') }}",
         "spark.executor.memory":         "{{ params.get('sparkExecutorMemory') }}",
+        # Cores per executor control how many tasks share the executor heap concurrently.
+        # The k8s environment sets 24 cores which starves each task of heap and makes the
+        # Celeborn shuffle writers OOM. Defaulting to 4 mirrors the Hadoop cluster where
+        # this workflow succeeded (24 cores in k8s starves each task of heap).
+        "spark.executor.cores":          "{{ params.get('sparkExecutorCores') }}",
         "spark.executor.memoryOverhead": "{{ params.get('sparkExecutorOverhead') }}",
         **hadoop_user_conf,
     }
@@ -246,6 +270,7 @@ def metadataextraction_cache_builder():
             "output_report_root_path": report_root,
             "sparkDriverMemory":     "{{ params.get('sparkDriverMemory') }}",
             "sparkExecutorMemory":   "{{ params.get('sparkExecutorMemory') }}",
+            "sparkExecutorCores":    "{{ params.get('sparkExecutorCores') }}",
             "sparkExecutorOverhead": "{{ params.get('sparkExecutorOverhead') }}",
         },
         wait_for_completion=True,

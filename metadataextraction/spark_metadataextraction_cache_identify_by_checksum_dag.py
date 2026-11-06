@@ -153,8 +153,27 @@ _UNDEFINED = "$UNDEFINED$"
         "cache_report_properties_prefix": Param(default="import.metadataExtraction", type="string"),
 
         # ---------------- spark tuning ----------------
-        "sparkDriverMemory": Param(default="4g", type="string"),
-        "sparkExecutorMemory": Param(default="4g", type="string"),
+        "sparkDriverMemory": Param(
+            default="7g",
+            type="string",
+            description="Memory for the driver. 7g mirrors the Hadoop cluster default for these "
+                        "transformations.",
+        ),
+        "sparkExecutorMemory": Param(
+            default="7g",
+            type="string",
+            description="Memory per executor. 7g mirrors the Hadoop cluster default for these "
+                        "transformations (YARN ran 7g with 4 cores, ~1.75g per task).",
+        ),
+        "sparkExecutorCores": Param(
+            default="4",
+            type="string",
+            description="Number of cores (and thus concurrent tasks) per executor. "
+                        "The k8s cluster environment defaults to 24 cores, which starves each "
+                        "task of heap and makes the Celeborn shuffle writers OOM. "
+                        "Defaulting to 4 mirrors the Hadoop cluster where this workflow "
+                        "succeeded (24 cores in k8s starves each task of heap).",
+        ),
         "sparkExecutorOverhead": Param(default="1024", type="string"),
     },
     tags=["openaire", "iis", "metadataextraction", "cache"],
@@ -175,6 +194,11 @@ def metadataextraction_cache_identify_by_checksum():
     spark_conf = {
         "spark.driver.memory":           "{{ params.get('sparkDriverMemory') }}",
         "spark.executor.memory":         "{{ params.get('sparkExecutorMemory') }}",
+        # Cores per executor control how many tasks share the executor heap concurrently.
+        # The k8s environment sets 24 cores which starves each task of heap and makes the
+        # Celeborn shuffle writers OOM. Defaulting to 4 mirrors the Hadoop cluster where
+        # this workflow succeeded (24 cores in k8s starves each task of heap).
+        "spark.executor.cores":          "{{ params.get('sparkExecutorCores') }}",
         "spark.executor.memoryOverhead": "{{ params.get('sparkExecutorOverhead') }}",
         **hadoop_user_conf,
     }

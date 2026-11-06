@@ -97,6 +97,13 @@ All Spark tasks share the established conventions of this repository:
 * Cache handling relies on `-cacheRootDir` + `-lockManagerFactoryClassName`
   (`HadoopFsLockManagerFactory` requires no external coordination service; use
   `ZookeeperLockManagerFactory` only for legacy Hadoop HA clusters).
+* `sparkExecutorCores` (default `4`) is set explicitly on every DAG in the chain (builder,
+  `identify_by_checksum`, `spark_content_url_chain`). The Kubernetes environment runs with 24
+  cores per executor, which leaves each concurrent task far too little heap — this caused the
+  `IdReplacerJob` shuffle-writer `OutOfMemoryError`. 4 mirrors the Hadoop cluster where the
+  workflow previously succeeded.
+* `sparkDriverMemory` and `sparkExecutorMemory` default to `7g` on the same DAGs, matching the
+  Hadoop cluster driver/executor memory (7g executor with 4 cores ≈ 1.75g per task).
 
 ## Optional content-url transformations (`input_id_mapping` / `input_id`)
 
@@ -152,22 +159,46 @@ Artifacts:
 image supplies them. With `shadedArtifactAttached=true`, `mvn install`/`deploy` publishes the uber
 artifact automatically.
 
-The shade profiles also apply the same exclusion filters as `iis-wf-primary` / `iis-wf-referenceextraction`:
+The shade profiles also apply size filters for the AWS SDK v2 stack:
 
 * `models/*.json` (AWS SDK v2 service models, ~0.5 GB raw)
-* `software.amazon.awssdk:*` (~1.8 GB raw)
-* `com.amazonaws:*` (~0.6 GB raw)
+* `software.amazon.awssdk:*` (~0.6 GB jar)
 * `software.amazon.s3.analyticsaccelerator:*`
 
-AWS SDK v1/v2 are provided at runtime by the `spark:4.1.2` image (built with `-Phadoop-cloud`,
-plus `hadoop-aws` in the bundled Hadoop distribution), so they must not be shipped in the uber JAR.
+**AWS SDK v1 (`com.amazonaws:*`) must NOT be excluded.** `ObjectStoreContentProviderUtils` /
+`ContentRetrievalContext` / `HadoopBasedS3CredentialsProvider` use `com.amazonaws.*` directly for
+`s3://` content retrieval, and the `spark:4.1.2` image does **not** provide it (its bundled Hadoop
+uses AWS SDK v2). Excluding it caused, at runtime:
+`java.lang.NoClassDefFoundError: com/amazonaws/auth/AWSCredentialsProvider`.
+It is therefore bundled back into the uber JARs.
+
+AWS SDK v2 and the S3 analytics accelerator are only needed by `hadoop-aws` (S3A paths), which the
+runtime image provides; the IIS code does not use them.
+
+### Two different S3 mechanisms — do not conflate them
+
+| | `s3://…` content URLs | `s3a://…` Hadoop paths |
+|---|---|---|
+| Where | `url` field of the `DocumentContent`/`DocumentMetadata` datastore, e.g. `s3://openaire-objectstore-prod/opendoar____::6f49…/arXiv_______::d266….pdf` | `-input` / `-output` / `-cacheRootDir` style path params |
+| Read by | `ObjectStoreContentProviderUtils.getContentFromS3()` → `AmazonS3Client` | Hadoop `FileSystem` via `hadoop-aws` |
+| API | **AWS SDK v1** (`com.amazonaws`) | **AWS SDK v2** (`software.amazon.awssdk`) |
+| Supplied by | **the uber JAR** (bundled — see above) | the `spark:4.1.1` image (`-Phadoop-cloud` → `spark-hadoop-cloud_2.13-4.1.1.jar`) |
+| Used by the ported code | **Yes** — this is how PDFs are fetched for extraction | No (`grep s3a://` → 0 hits in IIS Java and in the DAGs; the only `fs.s3a.*` occurrences are two credential *key names* read by `HadoopBasedS3CredentialsProvider`) |
+
+So: content retrieval from the object store is entirely SDK v1 and is self-contained in the uber JAR.
+Excluding SDK v2 only affects S3A, which nothing uses yet. The full set of `com.amazonaws` classes
+referenced anywhere in the repo is 13, all in `importer/content`
+(`ContentRetrievalContext`, `HadoopBasedS3CredentialsProvider`, `ObjectStoreContentProviderUtils`),
+and all 13 are verifiably present in the rebuilt jar.
+
+Gotcha: `s3://` is **not** a Hadoop scheme. Putting an object-store URL into a path param
+(`-input`, `-outputRoot`, `-cacheRootDir`, …) fails with *No FileSystem for scheme "s3"* — such paths
+must be `hdfs://…` or, if ever needed, `s3a://…`.
+
 Effect on artifact size:
 
-| Module | Before | After |
+| Module | Unfiltered | After filters |
 |---|---|---|
-| `iis-wf-import` | ~1.1 GB | ~50 MB |
-| `iis-wf-metadataextraction` | ~1.1 GB | ~85 MB |
+| `iis-wf-import` | ~1.1 GB | ~327 MB (incl. AWS SDK v1) |
+| `iis-wf-metadataextraction` | ~1.1 GB | ~362 MB (incl. AWS SDK v1) |
 | `iis-wf-report` | ~29 MB | ~29 MB (no AWS deps) |
-
-Note: `DocumentContentUrlBasedImporterJob` uses `com.amazonaws` classes directly. This works in the
-Spark image, but would fail if the JAR were run outside it (e.g. plain JRE pod without `hadoop-aws`).
