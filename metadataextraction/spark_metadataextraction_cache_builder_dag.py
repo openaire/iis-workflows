@@ -85,7 +85,7 @@ def _decision_copy_report(params):
     params={
         # ---------------- artifacts / runtime ----------------
         "JAR_METADATAEXTRACTION": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20261104.164632-18-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20261106.131809-19-uber.jar",
             type="string",
             description="iis-wf-metadataextraction uber JAR (cache chain job incl. metadata extractor)",
         ),
@@ -95,7 +95,7 @@ def _decision_copy_report(params):
             description="iis-wf-transformers uber JAR (checksum preprocessing job)",
         ),
         "JAR_IMPORT": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-import/1.3.0-SNAPSHOT/iis-wf-import-1.3.0-20261104.165042-11-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-import/1.3.0-SNAPSHOT/iis-wf-import-1.3.0-20261106.163908-14-uber.jar",
             type="string",
             description="iis-wf-import uber JAR (content url importer + content url chain)",
         ),
@@ -167,8 +167,23 @@ def _decision_copy_report(params):
         "grobid_server_read_timeout": Param(default="600000", type="string"),
         "grobid_server_throttle_sleep_time": Param(default="60000", type="string"),
         "grobid_server_max_retries_count": Param(default="10", type="string"),
-        "objectstore_s3_endpoint": Param(default=_UNDEFINED, type="string"),
-        "objectstore_s3_keystore_location": Param(default=_UNDEFINED, type="string"),
+        # ---------------- object store content retrieval ----------------
+        # Values taken from the original Oozie job.properties shipped with this workflow
+        # (iis-wf-metadataextraction/src/main/resources/.../cache/builder/job.properties).
+        # Without the endpoint, every s3:// content URL fails with
+        # S3EndpointNotFoundException ("no S3 client defined").
+        "objectstore_s3_endpoint": Param(
+            default="s3.icm.edu.pl",
+            type="string",
+            description="S3 (object store) service endpoint used to retrieve s3:// content URLs. "
+                        "Required whenever the imported urls point to the object store.",
+        ),
+        "objectstore_s3_keystore_location": Param(
+            default="jceks://hdfs/user/marek.horst/secrets/s3keyfile.jceks",
+            type="string",
+            description="Hadoop credential provider holding the fs.s3a.access.key / "
+                        "fs.s3a.secret.key entries. When missing, anonymous credentials are used.",
+        ),
 
         # ---------------- cache ----------------
         "cache_location": Param(
