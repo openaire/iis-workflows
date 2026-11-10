@@ -105,6 +105,46 @@ All Spark tasks share the established conventions of this repository:
 * `sparkDriverMemory` and `sparkExecutorMemory` default to `7g` on the same DAGs, matching the
   Hadoop cluster driver/executor memory (7g executor with 4 cores ≈ 1.75g per task).
 
+### Bounding Grobid concurrency (`grobidSparkExecutorInstances`)
+
+`MetadataExtractionCacheChainJob` calls the external Grobid service once per document, so the load
+it generates is proportional to the number of Spark tasks running concurrently. One param pins that
+number down (same mechanism as `crossref/mute_citations_parsing_and_export.py`):
+
+| Param | Default | Effect |
+|---|---|---|
+| `grobidSparkExecutorInstances` | `8` | fixed `spark.executor.instances` for that task |
+| `sparkExecutorCores` | `4` | concurrent tasks per executor |
+
+In-flight Grobid requests ≈ `grobidSparkExecutorInstances × sparkExecutorCores` = **32** by default.
+
+There is deliberately **no** switch for dynamic allocation. Capping is the entire purpose of this
+config, so enabling dynamic allocation would silently reintroduce the unbounded fan-out it guards
+against. Both `spark.executor.instances` and the CRD's `spec.dynamicAllocation` are therefore emitted
+with a fixed, non-tunable shape (`enabled: false`).
+
+**The guard is applied to `metadataextraction_cached` only** — it is the single task in these DAGs
+that reaches Grobid. `preprocessing`, `importer_content` and the `postprocessing-*` tasks do pure
+HDFS/object-store work, so they keep the environment's default dynamic allocation and are not
+throttled (`spark_extra_conf=spark_conf`); the pinned variant is `grobid_spark_conf` /
+`grobid_dynamic_allocation`.
+
+In `identify_by_checksum` the task runs with `-activeMetadataExtraction false`, so no Grobid calls
+happen there at all and the guard is dormant. It is still attached to that task so that enabling
+extraction later cannot silently reintroduce unlimited concurrency.
+
+Both `metadataextraction_cached` tasks pass `dynamic_allocation={...}` to `generate_spark_operator`,
+because the `SparkApplication` CRD exposes dynamic allocation as a first-class
+`spec.dynamicAllocation` field whose properties **override** `sparkConf`, and the operator's
+defaulting webhook enables it (with its own `maxExecutors`, currently 14) whenever the field is
+absent. Without the explicit field the executor count is not controllable — with 24 cores per
+executor that meant up to ~336 concurrent Grobid requests.
+
+`dag_utils.merge_dicts` gives the earlier dict precedence, so these values win over the
+`spark_template` Airflow Variable. To reduce Grobid load further, lower
+`grobidSparkExecutorInstances` (or `sparkExecutorCores`) when triggering the DAG; no code change
+needed.
+
 ## Object store (S3) content retrieval
 
 `importer_content` downloads the PDFs referenced by `s3://…` content URLs, so it needs the object

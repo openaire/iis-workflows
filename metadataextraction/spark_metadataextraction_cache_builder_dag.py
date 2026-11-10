@@ -123,7 +123,7 @@ def _decision_copy_report(params):
                         "$UNDEFINED$ → the transformers_idreplacer step is skipped.",
         ),
         "input_id": Param(
-            default="hdfs://nameservice1/tmp/marek.horst/metadataextraction/input_id/micro", 
+            default="hdfs://nameservice1/tmp/marek.horst/metadataextraction/input_id/mini", 
             type="string",
             description="Identifiers existing in OA+ (eu.dnetlib.iis.common.schemas.Identifier) used "
                         "by the existence filter to drop contents without metadata representatives. "
@@ -222,6 +222,17 @@ def _decision_copy_report(params):
                         "Defaulting to 4 mirrors the Hadoop cluster where this workflow "
                         "succeeded (24 cores in k8s starves each task of heap).",
         ),
+        # Applies ONLY to metadataextraction_cached -- the single task in this DAG that calls
+        # Grobid. The other tasks are not pinned (see grobid_spark_conf below).
+        "grobidSparkExecutorInstances": Param(
+            default=8,
+            type="integer",
+            description="Fixed number of Spark executors for metadataextraction_cached. With "
+                        "dynamic allocation disabled the number of concurrent tasks -- and "
+                        "therefore the number of in-flight Grobid requests -- is predictable: "
+                        "grobidSparkExecutorInstances x sparkExecutorCores. Lower it when Grobid "
+                        "gets overloaded.",
+        ),
         "sparkExecutorOverhead": Param(default="1024", type="string"),
     },
     tags=["openaire", "iis", "metadataextraction", "cache"],
@@ -249,6 +260,30 @@ def metadataextraction_cache_builder():
         "spark.executor.cores":          "{{ params.get('sparkExecutorCores') }}",
         "spark.executor.memoryOverhead": "{{ params.get('sparkExecutorOverhead') }}",
         **hadoop_user_conf,
+    }
+
+    # Grobid-facing configuration, applied ONLY to metadataextraction_cached -- the single job in
+    # this DAG that calls the Grobid service. The other jobs neither contact Grobid nor gain
+    # anything from being pinned, so they keep the environment's default dynamic allocation.
+    grobid_spark_conf = {
+        **spark_conf,
+        # Fixed executor count and dynamic allocation always off: the number of concurrent tasks,
+        # and therefore of in-flight Grobid requests, is then predictable
+        # (grobidSparkExecutorInstances x sparkExecutorCores). Capping is the whole purpose of
+        # this config, so dynamic allocation is deliberately NOT a tunable -- enabling it would
+        # silently reintroduce the unbounded fan-out this guards against.
+        "spark.executor.instances":        "{{ params.get('grobidSparkExecutorInstances') }}",
+        "spark.dynamicAllocation.enabled": "false",
+    }
+
+    # SparkApplication exposes dynamic allocation as a first-class spec field whose properties
+    # override sparkConf, and the operator's defaulting webhook enables it (with its own
+    # maxExecutors) when the field is absent. Emit it explicitly to keep the executor count fixed.
+    grobid_dynamic_allocation = {
+        "enabled": False,
+        "minExecutors": "1",
+        "maxExecutors": "{{ params.get('grobidSparkExecutorInstances') }}",
+        "shuffleTrackingEnabled": False,
     }
 
     imported_root    = "{{ params.get('workingDir') }}/import_content_url/imported"
@@ -353,8 +388,11 @@ def metadataextraction_cache_builder():
             "-lockManagerFactoryClassName", "{{ params.get('lockManagerFactoryClassName') }}",
             "-numberOfEmittedFilesInCache", "{{ params.get('numberOfEmittedFilesInCache') }}",
             # builder uses the skip_extracted_without_meta variant: does not return cached records
-            "-returnAlreadyExtractedMeta", "false",
-            "-activeMetadataExtraction",   "true",
+            # boolean options (JCommander arity 0) -- must use the '=' separator, otherwise the
+            # flag is consumed on its own and the bare true/false token becomes an unknown
+            # "main parameter"
+            "-returnAlreadyExtractedMeta=false",
+            "-activeMetadataExtraction=true",
             "-outputReportRootPath",       report_root,
             "-cacheReportRelativePath",    "import_metadataextraction_cache",
             "-extractionReportRelativePath", "import_metadataextraction",
@@ -369,7 +407,9 @@ def metadataextraction_cache_builder():
             "-grobidServerThrottleSleepTime", "{{ params.get('grobid_server_throttle_sleep_time') }}",
             "-grobidServerMaxRetriesCount",   "{{ params.get('grobid_server_max_retries_count') }}",
         ],
-        spark_extra_conf=spark_conf,
+        # the Grobid-concurrency guard: in-flight requests ~ instances x cores
+        dynamic_allocation=grobid_dynamic_allocation,
+        spark_extra_conf=grobid_spark_conf,
     )
 
     # ------------------------------------------------------------------ #
