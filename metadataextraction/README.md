@@ -76,6 +76,25 @@ already-utilised Airflow workflows**. Both factors were applied:
   metadata extraction cache is (re)created in the k8s environment this is a non-breaking change and
   makes the cache consistent with the other cached IIS jobs.
 
+### TEMPORARY: `skip_import_content_url` (testing aid)
+
+The hive-based content url import (`import_content_url` → `spark_content_url_chain`) is the slowest
+and most expensive step of the builder chain, which makes end-to-end testing painful. The builder
+DAG therefore accepts:
+
+| Param | Default | Effect |
+|---|---|---|
+| `skip_import_content_url` | `False` | `True` → do not trigger `spark_content_url_chain`; reuse the datastores already under `{workingDir}/import_content_url/imported` |
+
+Wiring: `decide_import_content_url` (BranchPythonOperator) selects either `import_content_url` or
+`skip_import_content_url`; both converge on `content_urls_ready` (`trigger_rule="none_failed"`),
+which feeds `preprocessing`. The Skip/join pair exists because a `BranchPythonOperator` may only
+select its own direct children — pointing the branch straight at `preprocessing` would skip it
+whenever the other branch was taken.
+
+**Remove this switch (param + `_decide_import_content_url` + the three tasks) once the port is
+validated**; a production run must always re-import the content urls.
+
 ## Not covered by this migration
 
 The following Oozie workflows referenced by the metadata extraction hierarchy are **not** part of

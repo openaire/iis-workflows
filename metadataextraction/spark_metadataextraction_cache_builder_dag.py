@@ -16,6 +16,8 @@ Original Oozie graph::
 Airflow mapping
 ---------------
   * ``import_content_url`` (reusable workflow)         → triggers the ``spark_content_url_chain`` DAG
+        (skippable via the TEMPORARY ``skip_import_content_url`` param, so a test run can reuse the
+        content urls already present under ``{workingDir}/import_content_url/imported``)
   * ``preprocessing`` (PIG, already ported)            → ``ChecksumPreprocessingJob``
   * ``check_input_isempty`` / ``decision_is_intput_empty``
         → absorbed by ``MetadataExtractionCacheChainJob`` which writes empty meta/fault datastores
@@ -78,6 +80,13 @@ def _decision_copy_report(params):
     return ["end"]
 
 
+def _decide_import_content_url(params):
+    """TEMPORARY testing switch: reuse the already imported content urls instead of re-importing."""
+    if params.get("skip_import_content_url"):
+        return ["skip_import_content_url"]
+    return ["import_content_url"]
+
+
 @dag(
     dag_id="spark_metadataextraction_cache_builder",
     dag_display_name="Metadata extraction cache: builder",
@@ -85,7 +94,7 @@ def _decision_copy_report(params):
     params={
         # ---------------- artifacts / runtime ----------------
         "JAR_METADATAEXTRACTION": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20261106.131809-19-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20261112.161644-20-uber.jar",
             type="string",
             description="iis-wf-metadataextraction uber JAR (cache chain job incl. metadata extractor)",
         ),
@@ -133,6 +142,19 @@ def _decision_copy_report(params):
         "mimetypes_html": Param(default="text/html", type="string"),
         "mimetypes_xml_pmc": Param(default="xml,application/xml", type="string"),
         "mimetypes_wos": Param(default="file::WoS", type="string"),
+
+        # TEMPORARY testing aid. The hive-based content url import is the slowest and most
+        # expensive step of the chain, so a test run can reuse the datastores a previous run
+        # already produced. Remove this switch (and the branch around import_content_url) once
+        # the port is validated.
+        "skip_import_content_url": Param(
+            default=False,
+            type="boolean",
+            description="TEMPORARY/testing only: skip the import_content_url step "
+                        "(spark_content_url_chain) and reuse the content url datastores already "
+                        "present under {workingDir}/import_content_url/imported. Keep false for a "
+                        "real run.",
+        ),
 
         # ---------------- working dir / output ----------------
         "workingDir": Param(
@@ -330,6 +352,28 @@ def metadataextraction_cache_builder():
         failed_states=["failed"],
     )
 
+    # TEMPORARY testing aid: either trigger the reusable content url chain DAG or reuse what a
+    # previous run already imported. A BranchPythonOperator may only select its own direct
+    # children, hence the explicit skip stub and the join below instead of wiring the branch
+    # straight into ``preprocessing`` (which would then be skipped whenever the other branch ran).
+    decide_import_content_url = BranchPythonOperator(
+        task_id="decide_import_content_url",
+        task_display_name="Import content urls? (temporary testing switch)",
+        python_callable=_decide_import_content_url,
+    )
+
+    skip_import_content_url = EmptyOperator(
+        task_id="skip_import_content_url",
+        task_display_name="Reuse already imported content urls",
+    )
+
+    content_urls_ready = EmptyOperator(
+        task_id="content_urls_ready",
+        task_display_name="Content urls available",
+        # exactly one of the two branches above completes, the other is skipped
+        trigger_rule="none_failed",
+    )
+
     # ------------------------------------------------------------------ #
     # 2. preprocessing (id → contentChecksum)                            #
     # ------------------------------------------------------------------ #
@@ -515,7 +559,9 @@ echo "[DONE] Report merged successfully"
     # ------------------------------------------------------------------ #
     # Wiring                                                             #
     # ------------------------------------------------------------------ #
-    import_content_url >> preprocessing >> importer_content >> metadataextraction_cached
+    decide_import_content_url >> [import_content_url, skip_import_content_url]
+    [import_content_url, skip_import_content_url] >> content_urls_ready
+    content_urls_ready >> preprocessing >> importer_content >> metadataextraction_cached
     metadataextraction_cached >> build_report >> decision_copy_report
     decision_copy_report >> [copy_report, end]
     copy_report >> end
