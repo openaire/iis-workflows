@@ -94,7 +94,7 @@ def _decide_import_content_url(params):
     params={
         # ---------------- artifacts / runtime ----------------
         "JAR_METADATAEXTRACTION": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20261112.161644-20-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20261112.164201-21-uber.jar",
             type="string",
             description="iis-wf-metadataextraction uber JAR (cache chain job incl. metadata extractor)",
         ),
@@ -183,7 +183,7 @@ def _decide_import_content_url(params):
         "content_read_timeout": Param(default="60000", type="string"),
         "log_fault_processing_time_threshold_secs": Param(default="60", type="string"),
         "interrupt_processing_time_threshold_secs": Param(default="120", type="string"),
-        "grobid_server_url": Param(default="https://grobid.openaire-cloud.icm.edu.pl", type="string"),
+        "grobid_server_url": Param(default="http://grobid.default:8070", type="string"),
         "grobid_server_version": Param(default="0.9.1", type="string"),
         "grobid_server_connection_timeout": Param(default="600000", type="string"),
         "grobid_server_read_timeout": Param(default="600000", type="string"),
