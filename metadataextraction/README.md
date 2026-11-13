@@ -65,7 +65,12 @@ already-utilised Airflow workflows**. Both factors were applied:
 * **Report builder output path**: the merged `report.json` is written to
   `{workingDir}/report_builder/report.json` (instead of `{workingDir}/report/working_dir/report.json`)
   so that it is not picked up as a partial-report subdirectory on reruns. The report *builder*
-  workflow is otherwise ported 1-to-1 via `ProcessWrapper` + `ReportMerger`.
+  workflow is otherwise ported 1-to-1 via `ProcessWrapper` + `ReportMerger`, launched with
+  `java_action` (i.e. `RunJavaSparkJob` on the Spark driver) instead of a bespoke
+  `KubernetesPodOperator` + shell script: the uber JAR is resolved and put on the classpath like
+  for any Spark task, and the Hadoop configuration comes from the environment. `ProcessWrapper`
+  is still required because `ReportMerger` implements `eu.dnetlib.iis.common.java.Process` and has
+  no `main`; it maps the Oozie-style `-I<port>=`/`-O<port>=` arguments onto the process ports.
 * **`remove_sideproducts` / `init-workingDir`**: left to cluster housekeeping (working-directory
   retention) rather than modelled as Airflow steps.
 * **`transientfault`**: written by `MetadataExtractorJob` for analysis only and never persisted in

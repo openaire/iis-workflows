@@ -33,8 +33,9 @@ Airflow mapping
   * ``cache_create`` / ``cache_update`` (lock + cache id + union + fault merge)
         → absorbed by ``MetadataExtractionCacheChainJob``.
   * ``report`` (report/builder workflow wrapping ProcessWrapper/ReportMerger)  → ``build_report``
-        (KubernetesPodOperator running ProcessWrapper around ``ReportMerger``, the same pattern as
-        ``primary/export_dag.py``).
+        (``java_action`` running ``ProcessWrapper`` around ``ReportMerger``; the launcher,
+        classpath and Hadoop configuration are the same as for the Spark tasks, so the Oozie
+        action needs no bespoke shell script)
   * ``finalize`` / ``remove_sideproducts``             → left to cluster housekeeping (working
         directory retention policy); it is intentionally not modelled in Airflow.
 """
@@ -45,7 +46,6 @@ from datetime import timedelta
 
 from airflow.decorators import dag
 from airflow.models.param import Param
-from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.providers.standard.operators.python import BranchPythonOperator
 from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
@@ -57,7 +57,7 @@ for path in (package_dir, parent_dir):
     if path not in sys.path:
         sys.path.append(path)
 
-from spark_configurator import generate_spark_operator
+from spark_configurator import generate_spark_operator, java_action
 
 EXECUTION_TIMEOUT = int(os.getenv("EXECUTION_TIMEOUT", 6))
 
@@ -109,7 +109,7 @@ def _decide_import_content_url(params):
             description="iis-wf-import uber JAR (content url importer + content url chain)",
         ),
         "JAR_REPORT": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-report/1.3.0-SNAPSHOT/iis-wf-report-1.3.0-20261104.165146-1-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-report/1.3.0-SNAPSHOT/iis-wf-report-1.3.0-20261113.155808-3-uber.jar",
             type="string",
             description="iis-wf-report uber JAR (ReportMerger)",
         ),
@@ -217,10 +217,6 @@ def _decide_import_content_url(params):
             default="eu.dnetlib.iis.common.lock.HadoopFsLockManagerFactory", type="string"),
         "numberOfEmittedFilesInCache": Param(default="1000", type="string"),
         "numberOfEmittedFiles": Param(default="1000", type="string"),
-
-        # ---------------- utility pod HDFS access ----------------
-        "HDFS_NAMENODE": Param(default="hdfs://nameservice1", type="string"),
-        "HADOOP_CONF_DIR": Param(default="/opt/hadoop/etc/hadoop", type="string"),
 
         # ---------------- spark tuning ----------------
         "sparkDriverMemory": Param(
@@ -458,75 +454,28 @@ def metadataextraction_cache_builder():
 
     # ------------------------------------------------------------------ #
     # 5. build-report (report/builder workflow: ProcessWrapper+ReportMerger)
+    #
+    # ReportMerger implements eu.dnetlib.iis.common.java.Process and has no main(), so
+    # ProcessWrapper stays the invoked class: it maps the Oozie-style -I<port>=/-O<port>=
+    # arguments onto the process ports. java_action runs it via
+    # eu.dnetlib.dhp.oozie.RunJavaSparkJob on the Spark driver, which resolves the uber JAR and
+    # puts it on the classpath the same way as for the Spark jobs, and the Hadoop configuration
+    # comes from the environment -- so the bespoke classpath/core-site.xml shell plumbing is gone.
     # ------------------------------------------------------------------ #
-    build_report = KubernetesPodOperator(
+    build_report = java_action(
         task_id="build_report",
         task_display_name="Merge partial reports into report.json (ReportMerger)",
-
-        name="build-report-{{ ds }}-{{ task_instance.try_number }}",
-        namespace="spark-jobs",
-        kubernetes_conn_id="kubernetes_default",
-
-        image="{{ params.get('SPARK_IMAGE') }}",
-        image_pull_policy="Always",
-
-        cmds=["/bin/bash"],
-        arguments=["-c", r"""
-set -euo pipefail
-
-JAR_URL="{{ params.get('JAR_REPORT') }}"
-JAR_FILENAME=$(basename "$JAR_URL")
-TMP_DIR=$(mktemp -d)
-trap 'rm -rf "$TMP_DIR"' EXIT
-
-export HADOOP_USER_NAME="{{ params.get('HADOOP_USER_NAME') }}"
-
-echo "[STEP 1] Downloading uber-JAR"
-wget -q -O "${TMP_DIR}/${JAR_FILENAME}" "$JAR_URL"
-
-echo "[STEP 2] Resolving Hadoop configuration"
-HADOOP_CONF_DIR='{{ params.get('HADOOP_CONF_DIR') }}'
-if [ -f "${HADOOP_CONF_DIR}/core-site.xml" ]; then
-    echo "  Using mounted Hadoop config from ${HADOOP_CONF_DIR}"
-    CP_CONF="${HADOOP_CONF_DIR}"
-else
-    echo "  Generating minimal core-site.xml (fs.defaultFS)"
-    mkdir -p "${TMP_DIR}/conf"
-    cat > "${TMP_DIR}/conf/core-site.xml" << 'CORE_XML'
-<?xml version="1.0"?>
-<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
-<configuration>
-    <property>
-        <name>fs.defaultFS</name>
-        <value>{{ params.get('HDFS_NAMENODE') }}</value>
-    </property>
-</configuration>
-CORE_XML
-    CP_CONF="${TMP_DIR}/conf"
-fi
-
-echo "[STEP 3] Running ReportMerger"
-cd "${TMP_DIR}"
-SPARK_CP="/opt/spark/jars/*"
-
-java \
-    -Djava.io.tmpdir="${TMP_DIR}" \
-    -cp "${CP_CONF}:${SPARK_CP}:${TMP_DIR}/${JAR_FILENAME}" \
-    eu.dnetlib.iis.common.java.ProcessWrapper \
-    eu.dnetlib.iis.wf.report.ReportMerger \
-    -Ipartial_reports={{ params.get('workingDir') }}/report \
-    -Oreport={{ params.get('workingDir') }}/report_builder/report.json
-
-echo "[DONE] Report merged successfully"
-        """],
-
-        env_vars={
-            "HADOOP_USER_NAME": "{{ params.get('HADOOP_USER_NAME') }}",
-        },
-
-        startup_timeout_seconds=300,
-        get_logs=True,
-        is_delete_operator_pod=True,
+        jar="{{ params.get('JAR_REPORT') }}",
+        main_class="eu.dnetlib.iis.common.java.ProcessWrapper",
+        arguments=[
+            "eu.dnetlib.iis.wf.report.ReportMerger",
+            # ProcessWrapper ports: '-I<port>=<path>' / '-O<port>=<path>', each passed as a
+            # single token that Commons CLI splits on the value separator
+            "-Ipartial_reports={{ params.get('workingDir') }}/report",
+            "-Oreport={{ params.get('workingDir') }}/report_builder/report.json",
+        ],
+        # write as the configured HDFS user, like the Spark tasks of this DAG
+        spark_extra_conf=hadoop_user_conf,
     )
 
     # ------------------------------------------------------------------ #

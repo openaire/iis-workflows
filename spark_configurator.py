@@ -66,19 +66,24 @@ def java_action(
         arguments: list[str],
         task_display_name: str = '',
         jar: str = dag_utils.get_dhp_jar(),
+        spark_extra_conf: dict[str, str] = None
 ) -> Any:
     """Generate an Operator for a Java class wrapped via RunJavaSparkJob."""
+    default_conf = {
+        "spark.dynamicAllocation.enabled": "false",
+        "spark.dynamicAllocation.minExecutors": "0",
+        "spark.dynamicAllocation.maxExecutors": "1"
+    }
+    if spark_extra_conf:
+        default_conf.update(spark_extra_conf)
+    
     return generate_spark_operator(
         task_id,
-        "eu.dnetlib.dhp.oozie.RunJavaSparkJob",
+        "eu.dnetlib.iis.common.spark.RunJavaSparkJob",
         [main_class] + arguments,
         task_display_name=task_display_name,
         jar=jar,
-        spark_extra_conf={
-            "spark.dynamicAllocation.enabled": "false",
-            "spark.dynamicAllocation.minExecutors": "0",
-            "spark.dynamicAllocation.maxExecutors": "1"
-        }
+        spark_extra_conf=default_conf
     )
 
 
