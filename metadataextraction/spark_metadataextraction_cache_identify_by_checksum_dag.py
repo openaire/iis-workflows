@@ -19,10 +19,11 @@ Airflow mapping
     ``CachedWebCrawlerJob``/``CacheStorageUtils`` pattern) instead of being reproduced as a
     set of airflow workflows: the cache management logic is not reused anywhere else and its
     conditional transitions / ZooKeeper lock utility actions are much cleaner inside Spark.
-  * ``metadata_extractor`` (prefetched = importer_content + core)
-        - ``importer_content`` (MapReduce, object store)  → ``DocumentContentUrlBasedImporterJob``
-        - ``core`` (``MetadataExtractorMapper``)          → ``MetadataExtractorJob`` (invoked
-          in-process by ``MetadataExtractionCacheChainJob``)
+  * ``metadataextraction_cached`` (cache lookup only)
+        → ``MetadataExtractionCacheChainJob`` on the preprocessed ``DocumentContentUrl`` datastore
+          with ``-activeMetadataExtraction=false``: the job drops the already-cached ids and returns
+          the cached metadata. No content is imported and nothing is extracted, so the Oozie
+          ``prefetched`` sub-workflow (importer_content + core) has no counterpart here.
   * ``postprocessing-meta`` (PIG, already ported)      → ``ChecksumMetaPostprocessingJob``
   * ``postprocessing-fault`` (PIG, already ported)     → ``ChecksumFaultPostprocessingJob``
 """
@@ -71,11 +72,6 @@ _UNDEFINED = "$UNDEFINED$"
             type="string",
             description="iis-wf-transformers uber JAR (checksum preprocessing/postprocessing jobs)",
         ),
-        "JAR_IMPORT": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-import/1.3.0-SNAPSHOT/iis-wf-import-1.3.0-uber.jar",
-            type="string",
-            description="iis-wf-import uber JAR (content url based importer)",
-        ),
         "SPARK_IMAGE": Param(
             "docker-registry.openaire.eu/kubernetes_devel/spark:4.1.2", type="string"),
         "HADOOP_USER_NAME": Param("marek.horst", type="string"),
@@ -101,45 +97,15 @@ _UNDEFINED = "$UNDEFINED$"
         "output_name_transient_fault": Param(default="transientfault", type="string"),
 
         # ---------------- metadata extraction ----------------
+        # This workflow only reads the cache (activeMetadataExtraction=false): it performs no
+        # extraction and imports no content bytes, so all Grobid / content-retrieval settings are
+        # gone. The chain job falls back to its built-in defaults for them.
         "excluded_ids": Param(
             default=_UNDEFINED, type="string",
             description="CSV of content identifiers (checksums) excluded from processing",
         ),
-        "max_file_size_mb": Param(default=_UNDEFINED, type="string",
-                                  description="Maximum allowed content size in MB"),
-        "content_connection_timeout": Param(default="60000", type="string"),
-        "content_read_timeout": Param(default="60000", type="string"),
         "log_fault_processing_time_threshold_secs": Param(default="60", type="string"),
         "interrupt_processing_time_threshold_secs": Param(default="120", type="string"),
-
-        # ---------------- grobid ----------------
-        "grobid_server_url": Param(
-            default=_UNDEFINED, type="string",
-            description="Grobid server address; $UNDEFINED$ → embedded CERMINE is used",
-        ),
-        "grobid_server_version": Param(default=_UNDEFINED, type="string"),
-        "grobid_server_connection_timeout": Param(default="600000", type="string"),
-        "grobid_server_read_timeout": Param(default="600000", type="string"),
-        "grobid_server_throttle_sleep_time": Param(default="60000", type="string"),
-        "grobid_server_max_retries_count": Param(default="10", type="string"),
-
-        # ---------------- object store content retrieval ----------------
-        # Values taken from the original Oozie job.properties shipped with this workflow
-        # (iis-wf-metadataextraction/src/main/resources/.../cache/builder/job.properties).
-        # Without the endpoint, every s3:// content URL fails with
-        # S3EndpointNotFoundException ("no S3 client defined").
-        "objectstore_s3_endpoint": Param(
-            default="s3.icm.edu.pl",
-            type="string",
-            description="S3 (object store) service endpoint used to retrieve s3:// content URLs. "
-                        "Required whenever the imported urls point to the object store.",
-        ),
-        "objectstore_s3_keystore_location": Param(
-            default="jceks://hdfs/user/marek.horst/secrets/s3keyfile.jceks",
-            type="string",
-            description="Hadoop credential provider holding the fs.s3a.access.key / "
-                        "fs.s3a.secret.key entries. When missing, anonymous credentials are used.",
-        ),
 
         # ---------------- cache ----------------
         "cache_location": Param(
@@ -188,18 +154,6 @@ _UNDEFINED = "$UNDEFINED$"
                         "Defaulting to 4 mirrors the Hadoop cluster where this workflow "
                         "succeeded (24 cores in k8s starves each task of heap).",
         ),
-        # Applies ONLY to metadataextraction_cached -- the only task here that uses the
-        # MetadataExtractorJob/Grobid path. The other tasks are not pinned (see
-        # grobid_spark_conf below).
-        "grobidSparkExecutorInstances": Param(
-            default=8,
-            type="integer",
-            description="Fixed number of Spark executors for metadataextraction_cached. With "
-                        "dynamic allocation disabled the number of concurrent tasks -- and "
-                        "therefore the number of in-flight Grobid requests -- is predictable: "
-                        "grobidSparkExecutorInstances x sparkExecutorCores. Lower it when Grobid "
-                        "gets overloaded.",
-        ),
         "sparkExecutorOverhead": Param(default="1024", type="string"),
     },
     tags=["openaire", "iis", "metadataextraction", "cache"],
@@ -229,36 +183,8 @@ def metadataextraction_cache_identify_by_checksum():
         **hadoop_user_conf,
     }
 
-    # Grobid-facing configuration, applied ONLY to metadataextraction_cached -- the only job here
-    # that uses the MetadataExtractorJob/Grobid path. The other jobs neither contact Grobid nor
-    # gain anything from being pinned, so they keep the environment's default dynamic allocation.
-    # NOTE: this workflow currently passes -activeMetadataExtraction=false (it only reads what the
-    # builder extracted), so the guard is dormant; it is kept on the job that would call Grobid so
-    # that enabling extraction later cannot silently reintroduce unlimited concurrency.
-    grobid_spark_conf = {
-        **spark_conf,
-        # Fixed executor count and dynamic allocation always off: the number of concurrent tasks,
-        # and therefore of in-flight Grobid requests, is then predictable
-        # (grobidSparkExecutorInstances x sparkExecutorCores). Capping is the whole purpose of
-        # this config, so dynamic allocation is deliberately NOT a tunable -- enabling it would
-        # silently reintroduce the unbounded fan-out this guards against.
-        "spark.executor.instances":        "{{ params.get('grobidSparkExecutorInstances') }}",
-        "spark.dynamicAllocation.enabled": "false",
-    }
-
-    # SparkApplication exposes dynamic allocation as a first-class spec field whose properties
-    # override sparkConf, and the operator's defaulting webhook enables it (with its own
-    # maxExecutors) when the field is absent. Emit it explicitly to keep the executor count fixed.
-    grobid_dynamic_allocation = {
-        "enabled": False,
-        "minExecutors": "1",
-        "maxExecutors": "{{ params.get('grobidSparkExecutorInstances') }}",
-        "shuffleTrackingEnabled": False,
-    }
-
     report_root = "{{ params.get('output_report_root_path') or (params.get('workingDir') + '/report') }}"
     preprocessed = "{{ params.get('workingDir') }}/preprocessing/output"
-    imported_content = "{{ params.get('workingDir') }}/importer_content/output"
     cache_out = "{{ params.get('workingDir') }}/metadataextraction_cached/out"
 
     # ------------------------------------------------------------------ #
@@ -278,31 +204,12 @@ def metadataextraction_cache_identify_by_checksum():
     )
 
     # ------------------------------------------------------------------ #
-    # 2. importer_content (DocumentContentUrl → DocumentContent bytes)   #
-    #    (Oozie metadataextraction/prefetched → importer_content)        #
-    # ------------------------------------------------------------------ #
-    importer_content = generate_spark_operator(
-        task_id="importer_content",
-        task_display_name="Retrieve content bytes (DocumentContentUrlBasedImporterJob)",
-        jar="{{ params.get('JAR_IMPORT') }}",
-        image="{{ params.get('SPARK_IMAGE') }}",
-        main_class="eu.dnetlib.iis.wf.importer.content.DocumentContentUrlBasedImporterJob",
-        arguments=[
-            "-input",            preprocessed,
-            "-output",           imported_content,
-            "-outputReportPath", report_root + "/import_content_pdf",
-            "-maxFileSizeMb",    "{{ params.get('max_file_size_mb') }}",
-            "-contentConnectionTimeout", "{{ params.get('content_connection_timeout') }}",
-            "-contentReadTimeout",       "{{ params.get('content_read_timeout') }}",
-            "-objectstoreS3Endpoint",    "{{ params.get('objectstore_s3_endpoint') }}",
-            "-objectstoreS3KeystoreLocation", "{{ params.get('objectstore_s3_keystore_location') }}",
-        ],
-        spark_extra_conf=spark_conf,
-    )
-
-    # ------------------------------------------------------------------ #
-    # 3. metadataextraction_cached (cache chain: skip_extracted →        #
-    #    cache create/update → metadata extractor → union + faults)      #
+    # 2. metadataextraction_cached (cache chain: cache id resolution +    #
+    #    cache lookup → union + faults)                                  #
+    #                                                                    #
+    # No importer_content step: extraction is disabled here, so the PDF  #
+    # bytes are never needed -- only the identifiers of the documents    #
+    # (the preprocessed DocumentContentUrl datastore).                   #
     # ------------------------------------------------------------------ #
     metadataextraction_cached = generate_spark_operator(
         task_id="metadataextraction_cached",
@@ -311,7 +218,7 @@ def metadataextraction_cache_identify_by_checksum():
         image="{{ params.get('SPARK_IMAGE') }}",
         main_class="eu.dnetlib.iis.wf.metadataextraction.cache.MetadataExtractionCacheChainJob",
         arguments=[
-            "-input",            imported_content,
+            "-input",            preprocessed,
             "-outputRoot",       cache_out,
             "-outputNameMeta",   "{{ params.get('output_name_meta') }}",
             "-outputNameFault",  "{{ params.get('output_name_fault') }}",
@@ -332,16 +239,8 @@ def metadataextraction_cache_identify_by_checksum():
             "-excludedIds",                "{{ params.get('excluded_ids') }}",
             "-logFaultProcessingTimeThresholdSecs",      "{{ params.get('log_fault_processing_time_threshold_secs') }}",
             "-interruptProcessingTimeThresholdSecs",     "{{ params.get('interrupt_processing_time_threshold_secs') }}",
-            "-grobidServerUrl",            "{{ params.get('grobid_server_url') }}",
-            "-grobidServerVersion",        "{{ params.get('grobid_server_version') }}",
-            "-grobidServerConnectionTimeout", "{{ params.get('grobid_server_connection_timeout') }}",
-            "-grobidServerReadTimeout",       "{{ params.get('grobid_server_read_timeout') }}",
-            "-grobidServerThrottleSleepTime", "{{ params.get('grobid_server_throttle_sleep_time') }}",
-            "-grobidServerMaxRetriesCount",   "{{ params.get('grobid_server_max_retries_count') }}",
         ],
-        # the Grobid-concurrency guard: in-flight requests ~ instances x cores
-        dynamic_allocation=grobid_dynamic_allocation,
-        spark_extra_conf=grobid_spark_conf,
+        spark_extra_conf=spark_conf,
     )
 
     # ------------------------------------------------------------------ #
@@ -380,7 +279,7 @@ def metadataextraction_cache_identify_by_checksum():
     # ------------------------------------------------------------------ #
     # Wiring                                                             #
     # ------------------------------------------------------------------ #
-    preprocessing >> importer_content >> metadataextraction_cached
+    preprocessing >> metadataextraction_cached
     metadataextraction_cached >> [postprocessing_meta, postprocessing_fault]
     [postprocessing_meta, postprocessing_fault] >> end
 
