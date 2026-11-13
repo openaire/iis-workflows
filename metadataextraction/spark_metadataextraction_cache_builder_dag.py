@@ -94,7 +94,7 @@ def _decide_import_content_url(params):
     params={
         # ---------------- artifacts / runtime ----------------
         "JAR_METADATAEXTRACTION": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20261112.164201-21-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20261113.113147-22-uber.jar",
             type="string",
             description="iis-wf-metadataextraction uber JAR (cache chain job incl. metadata extractor)",
         ),
