@@ -23,13 +23,13 @@ Airflow mapping
         → absorbed by ``MetadataExtractionCacheChainJob`` which writes empty meta/fault datastores
           for empty input (the original Oozie branching existed only because of the cumbersome
           conditional transitions; the outcome is identical and much simpler).
-  * ``metadata_extractor`` (prefetched = importer_content + core)
-        - ``importer_content`` (MapReduce, object store)  → ``DocumentContentUrlBasedImporterJob``
-        - ``core`` (``MetadataExtractorMapper``)          → ``MetadataExtractorJob`` (invoked
-          in-process by ``MetadataExtractionCacheChainJob``)
-  * ``transformers_metadataextraction_skip_extracted`` (PIG, already ported)
-        → absorbed by ``MetadataExtractionCacheChainJob`` (``-returnAlreadyExtractedMeta=false``,
-          i.e. the ``skip_extracted_without_meta`` variant used by the builder).
+  * ``metadata_extractor`` (prefetched = importer_content + core) **and**
+    ``transformers_metadataextraction_skip_extracted``
+        → both absorbed by ``MetadataExtractionCacheChainJob``: it takes the content URLs, drops
+          the ids already present in the cache (the skip_extracted step, cache id resolved
+          internally -- the Oozie ``get-existing-cache-id`` action is gone), then imports the PDF
+          bytes in-process for the remaining subset only (``DocumentContentUrlBasedImporterJob``
+          reused as a library, no intermediate datastore) and extracts via ``MetadataExtractorJob``.
   * ``cache_create`` / ``cache_update`` (lock + cache id + union + fault merge)
         → absorbed by ``MetadataExtractionCacheChainJob``.
   * ``report`` (report/builder workflow wrapping ProcessWrapper/ReportMerger)  → ``build_report``
@@ -94,7 +94,7 @@ def _decide_import_content_url(params):
     params={
         # ---------------- artifacts / runtime ----------------
         "JAR_METADATAEXTRACTION": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20261113.113147-22-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20261113.181136-23-uber.jar",
             type="string",
             description="iis-wf-metadataextraction uber JAR (cache chain job incl. metadata extractor)",
         ),
@@ -306,7 +306,6 @@ def metadataextraction_cache_builder():
 
     imported_root    = "{{ params.get('workingDir') }}/import_content_url/imported"
     preprocessed_out = "{{ params.get('workingDir') }}/preprocessing/output"
-    imported_content = "{{ params.get('workingDir') }}/importer_content/output"
     cache_out        = "{{ params.get('workingDir') }}/metadata_extractor/output_root"
     report_root      = "{{ params.get('workingDir') }}/report"
 
@@ -387,30 +386,12 @@ def metadataextraction_cache_builder():
     )
 
     # ------------------------------------------------------------------ #
-    # 3. importer_content (DocumentContentUrl → DocumentContent bytes)    #
-    # ------------------------------------------------------------------ #
-    importer_content = generate_spark_operator(
-        task_id="importer_content",
-        task_display_name="Retrieve content bytes (DocumentContentUrlBasedImporterJob)",
-        jar="{{ params.get('JAR_IMPORT') }}",
-        image="{{ params.get('SPARK_IMAGE') }}",
-        main_class="eu.dnetlib.iis.wf.importer.content.DocumentContentUrlBasedImporterJob",
-        arguments=[
-            "-input",            preprocessed_out,
-            "-output",           imported_content,
-            "-outputReportPath", report_root + "/import_content_pdf",
-            "-maxFileSizeMb",    "{{ params.get('max_file_size_mb') }}",
-            "-contentConnectionTimeout", "{{ params.get('content_connection_timeout') }}",
-            "-contentReadTimeout",       "{{ params.get('content_read_timeout') }}",
-            "-objectstoreS3Endpoint",    "{{ params.get('objectstore_s3_endpoint') }}",
-            "-objectstoreS3KeystoreLocation", "{{ params.get('objectstore_s3_keystore_location') }}",
-        ],
-        spark_extra_conf=spark_conf,
-    )
-
-    # ------------------------------------------------------------------ #
-    # 4. metadata_extractor + cache create/update                        #
-    #    (skip_extracted_without_meta: nothing is returned from cache)    #
+    # 3. metadata_extractor + cache create/update                        #
+    #
+    # The content urls are the input: the job drops the already-cached ids (the Oozie
+    # skip_extracted logic) and imports the PDF bytes IN-PROCESS for the remaining subset only
+    # (the Oozie prefetched sub-workflow), then extracts and updates the cache. Doing all three
+    # in one job avoids both a duplicated cache filter and a full-object-store import.
     # ------------------------------------------------------------------ #
     metadataextraction_cached = generate_spark_operator(
         task_id="metadataextraction_cached",
@@ -419,7 +400,7 @@ def metadataextraction_cache_builder():
         image="{{ params.get('SPARK_IMAGE') }}",
         main_class="eu.dnetlib.iis.wf.metadataextraction.cache.MetadataExtractionCacheChainJob",
         arguments=[
-            "-input",            imported_content,
+            "-input",            preprocessed_out,
             "-outputRoot",       cache_out,
             "-outputNameMeta",   "{{ params.get('output_name_meta') }}",
             "-outputNameFault",  "{{ params.get('output_name_fault') }}",
@@ -427,7 +408,13 @@ def metadataextraction_cache_builder():
             "-cacheRootDir",     "{{ params.get('cache_location') }}",
             "-lockManagerFactoryClassName", "{{ params.get('lockManagerFactoryClassName') }}",
             "-numberOfEmittedFilesInCache", "{{ params.get('numberOfEmittedFilesInCache') }}",
-            # builder uses the skip_extracted_without_meta variant: does not return cached records
+            # content retrieval (in-process, applied to the not-yet-cached subset only)
+            "-maxFileSizeMb",    "{{ params.get('max_file_size_mb') }}",
+            "-contentConnectionTimeout", "{{ params.get('content_connection_timeout') }}",
+            "-contentReadTimeout",       "{{ params.get('content_read_timeout') }}",
+            "-objectstoreS3Endpoint",    "{{ params.get('objectstore_s3_endpoint') }}",
+            "-objectstoreS3KeystoreLocation", "{{ params.get('objectstore_s3_keystore_location') }}",
+            # builder does not return records already present in the cache
             # boolean options (JCommander arity 0) -- must use the '=' separator, otherwise the
             # flag is consumed on its own and the bare true/false token becomes an unknown
             # "main parameter"
@@ -453,7 +440,7 @@ def metadataextraction_cache_builder():
     )
 
     # ------------------------------------------------------------------ #
-    # 5. build-report (report/builder workflow: ProcessWrapper+ReportMerger)
+    # 6. build-report (report/builder workflow: ProcessWrapper+ReportMerger)
     #
     # ReportMerger implements eu.dnetlib.iis.common.java.Process and has no main(), so
     # ProcessWrapper stays the invoked class: it maps the Oozie-style -I<port>=/-O<port>=
@@ -479,7 +466,7 @@ def metadataextraction_cache_builder():
     )
 
     # ------------------------------------------------------------------ #
-    # 6. decision-copy-report + copy-report (distcp)                     #
+    # 7. decision-copy-report + copy-report (distcp)                     #
     # ------------------------------------------------------------------ #
     decision_copy_report = BranchPythonOperator(
         task_id="decision_copy_report",
@@ -510,7 +497,7 @@ def metadataextraction_cache_builder():
     # ------------------------------------------------------------------ #
     decide_import_content_url >> [import_content_url, skip_import_content_url]
     [import_content_url, skip_import_content_url] >> content_urls_ready
-    content_urls_ready >> preprocessing >> importer_content >> metadataextraction_cached
+    content_urls_ready >> preprocessing >> metadataextraction_cached
     metadataextraction_cached >> build_report >> decision_copy_report
     decision_copy_report >> [copy_report, end]
     copy_report >> end

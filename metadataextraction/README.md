@@ -16,9 +16,57 @@ cache builder) Oozie workflows so that they can run in the new Kubernetes enviro
 | `eu.dnetlib.iis.wf.importer.content.DocumentContentUrlDispatcherJob` | `content_url/chain` MapReduce `DocumentContentUrlDispatcher` | Mime-type based dispatch to `pdf`/`html`/`xmlpmc`/`wos` ports + per-type report entries. |
 
 Already ported Spark jobs are **reused as-is**: `ChecksumPreprocessingJob`,
-`SkipExtractedWithoutMetaJob` (logic absorbed by the cache chain job), `UnionJob`,
+`SkipExtractedWithoutMetaJob` (standalone variant, unchanged), `UnionJob`,
 `ChecksumMetaPostprocessingJob`, `ChecksumFaultPostprocessingJob`, `IdReplacerJob`,
 `ExistenceFilterJob`, `HiveBasedDocumentContentUrlImporterJob`.
+
+### Content is imported only for the not-yet-cached subset
+
+Oozie runs `transformer_metadataextraction_skip_extracted` on the preprocessed content **urls** and
+only then calls `prefetched` (= `importer_content` + `metadata_extractor`) on that reduced input.
+This matters a lot: the object store holds tens of millions of PDFs, so importing bytes of already
+cached documents would dominate run time and S3 traffic.
+
+Instead of recreating that as extra Airflow tasks, the whole sequence lives in
+`MetadataExtractionCacheChainJob`, which is the job that already owned the cache lookup:
+
+```
+import_content_url → preprocessing → metadataextraction_cached → build_report
+                                          └ drop cached ids
+                                          └ import PDF bytes (subset only, in-process)
+                                          └ extract (Grobid) + update cache
+```
+
+Pipeline inside the job:
+
+1. read the preprocessed `DocumentContentUrl` datastore (`-input`),
+2. drop the ids already present in the cache (the `skip_extracted_without_meta` logic, cache id
+   resolved via `CacheMetadataManagingProcess` — the Oozie `get-existing-cache-id` action is gone),
+3. if `-activeMetadataExtraction=true`, fetch the PDF bytes **in-process** for the remaining urls by
+   calling `DocumentContentUrlBasedImporterJob.importContent(...)` — the importer is reused as a
+   library, exactly like `MetadataExtractorJob.extract(...)`, so nothing is duplicated,
+4. extract and update the cache; the importer's `import.contents.pdf.*` counters are emitted from
+   the same job so `report.json` keeps those entries.
+
+Consequences worth knowing:
+
+* no intermediate datastore is written for either the filtered urls or the imported content (the old
+  design materialised ~400 GB of `DocumentContent` for a micro run);
+* a retried task re-downloads its partition's PDFs (there is nothing persisted to reuse) — cheap
+  relative to the Grobid call it accompanies, and a net win versus importing everything up front;
+* `DocumentContentUrlBasedImporterJob` is still a standalone job (own `main`) and is still used as
+  such elsewhere.
+
+### `identify_by_checksum` only looks ids up
+
+That workflow never extracts (`-activeMetadataExtraction=false`), so it never updates the cache and
+never needs the PDF bytes: the job simply returns the cached metadata for the input ids. Its
+`importer_content` step was removed and no Grobid or content-retrieval parameters are passed — the
+job falls back to its built-in defaults. With no Grobid call there is no reason to pin executors, so
+that DAG also drops the `grobid_spark_conf`/`grobid_dynamic_allocation` variant and uses the shared
+`spark_conf`.
+
+Result: `preprocessing → metadataextraction_cached → postprocessing-{meta,fault}`.
 
 ### Airflow DAGs (in this repository)
 
