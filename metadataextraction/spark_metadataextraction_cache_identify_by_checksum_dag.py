@@ -63,12 +63,12 @@ _UNDEFINED = "$UNDEFINED$"
     params={
         # ---------------- artifacts / runtime ----------------
         "JAR_METADATAEXTRACTION": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20261117.152610-24-uber.jar",
             type="string",
             description="iis-wf-metadataextraction uber JAR (cache chain job incl. metadata extractor)",
         ),
         "JAR_TRANSFORMERS": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-transformers/1.3.0-SNAPSHOT/iis-wf-transformers-1.3.0-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-transformers/1.3.0-SNAPSHOT/iis-wf-transformers-1.3.0-20261104.164945-19-uber.jar",
             type="string",
             description="iis-wf-transformers uber JAR (checksum preprocessing/postprocessing jobs)",
         ),
@@ -78,7 +78,7 @@ _UNDEFINED = "$UNDEFINED$"
 
         # ---------------- input / output ----------------
         "input": Param(
-            default="hdfs://nameservice1/tmp/marek.horst/metadataextraction/input/pdf/micro/",
+            default="hdfs://nameservice1/tmp/marek.horst/metadataextraction/cache_builder/import_content_url/imported/pdf",
             type="string",
             description="Input DocumentContentUrl datastore",
         ),
@@ -126,7 +126,7 @@ _UNDEFINED = "$UNDEFINED$"
 
         # ---------------- reports ----------------
         "output_report_root_path": Param(
-            default="", type="string",
+            default="hdfs://nameservice1/tmp/marek.horst/metadataextraction/identify_by_checksum/report", type="string",
             description="Base directory for partial reports. Empty → {workingDir}/report",
         ),
         "cache_report_relative_path": Param(default="import_metadataextraction_cache", type="string"),
@@ -245,6 +245,13 @@ def metadataextraction_cache_identify_by_checksum():
 
     # ------------------------------------------------------------------ #
     # 4. postprocessing (checksum → OA+ identifier)                      #
+    #
+    # NOTE: -inputDocumentContentUrl must be the WORKFLOW input (the original DocumentContentUrl
+    # with OA+ ids), NOT the preprocessed datastore. ChecksumMeta/FaultPostprocessingJob build a
+    # map contentChecksum -> id; after preprocessing the id field already holds the checksum, so
+    # feeding `preprocessed` here would still join and would silently write checksums instead of
+    # the original identifiers. Verified against the Oozie workflow, where both postprocessing
+    # actions bind input_document_content_url=${input}.
     # ------------------------------------------------------------------ #
     postprocessing_meta = generate_spark_operator(
         task_id="postprocessing-meta",
@@ -254,7 +261,7 @@ def metadataextraction_cache_identify_by_checksum():
         main_class="eu.dnetlib.iis.wf.transformers.metadataextraction.checksum.postprocessing.meta.ChecksumMetaPostprocessingJob",
         arguments=[
             "-inputExtractedDocumentMetadata", cache_out + "/{{ params.get('output_name_meta') }}",
-            "-inputDocumentContentUrl",        preprocessed,
+            "-inputDocumentContentUrl",        "{{ params.get('input') }}",
             "-output",                         "{{ params.get('output_root') }}/{{ params.get('output_name_meta') }}",
         ],
         spark_extra_conf=spark_conf,
@@ -268,7 +275,7 @@ def metadataextraction_cache_identify_by_checksum():
         main_class="eu.dnetlib.iis.wf.transformers.metadataextraction.checksum.postprocessing.fault.ChecksumFaultPostprocessingJob",
         arguments=[
             "-inputFault",               cache_out + "/{{ params.get('output_name_fault') }}",
-            "-inputDocumentContentUrl",  preprocessed,
+            "-inputDocumentContentUrl",  "{{ params.get('input') }}",
             "-output",                   "{{ params.get('output_root') }}/{{ params.get('output_name_fault') }}",
         ],
         spark_extra_conf=spark_conf,

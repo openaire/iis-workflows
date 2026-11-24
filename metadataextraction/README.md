@@ -148,6 +148,58 @@ whenever the other branch was taken.
 **Remove this switch (param + `_decide_import_content_url` + the three tasks) once the port is
 validated**; a production run must always re-import the content urls.
 
+## Oozie → Airflow data-flow audit
+
+Every port/wire is checked against the `<value>` expressions of the original Oozie actions (not
+against intuition about the pipeline order). Re-verify with
+`grep -n '<name>\|<value>' <oozie_app>/workflow.xml` whenever a DAG changes.
+
+### `identify_by_checksum`
+
+| Oozie action / property | Oozie `<value>` | Airflow |
+|---|---|---|
+| `preprocessing.input` | `${input}` | `params.input` |
+| `preprocessing.output` | `${workingDir}/preprocessing/output` | `preprocessed` |
+| `metadataextraction_cached.input` | `${workingDir}/preprocessing/output` | `preprocessed` |
+| `metadataextraction_cached.output_root` | `${workingDir}/metadataextraction_cached/out` | `cache_out` |
+| `postprocessing-meta.input_document_content_url` | `${input}` | `params.input` |
+| `postprocessing-meta.input_extracted_document_metadata` | `.../metadataextraction_cached/out/${output_name_meta}` | `cache_out/meta` |
+| `postprocessing-meta.output` | `${output_root}/${output_name_meta}` | `params.output_root/meta` |
+| `postprocessing-fault.input_document_content_url` | `${input}` | `params.input` |
+| `postprocessing-fault.input_fault` | `.../metadataextraction_cached/out/${output_name_fault}` | `cache_out/fault` |
+| `postprocessing-fault.output` | `${output_root}/${output_name_fault}` | `params.output_root/fault` |
+
+> **Regression caught here:** both postprocessing steps were originally wired to the *preprocessed*
+> datastore instead of `${input}`. `ChecksumMeta/FaultPostprocessingJob` build
+> `contentChecksum -> id`; after `ChecksumPreprocessingJob` the `id` field *is* the checksum, so the
+> inner join still matched and the job silently wrote checksums instead of the OA+ identifiers — no
+> error, wrong data. Type-correct, runs fine, only a value-level diff catches it.
+
+### `cache/builder`
+
+| Oozie action / property | Oozie `<value>` | Airflow |
+|---|---|---|
+| `import_content_url.workingDir` | `${workingDir}/import_content_url/working_dir` | same |
+| `import_content_url.output_root` | `${workingDir}/import_content_url/imported` | `imported_root` |
+| `import_content_url.mimetypes_html` | `text/html` | `mimetypes_html` default |
+| `import_content_url.mimetypes_wos` | `file::WoS` | `mimetypes_wos` default |
+| `import_content_url.output_name_pdf` / `_xml_pmc` | `pdf` / `xmlpmc` | same |
+| `import_content_url.output_report_root_path` | `${workingDir}/report` | `report_root` |
+| `preprocessing.input` | `${workingDir}/import_content_url/imported/${import_mode}` | `imported_root/import_mode` |
+| `preprocessing.output` | `${workingDir}/preprocessing/output` | `preprocessed_out` |
+| `skip_extracted.input_document_content` | `${workingDir}/preprocessing/output` | in-process: `toBeProcessedUrls` derived from `preprocessed_out` |
+| `skip_extracted.input_document_meta` | `${cache_location}/${cache_id}/meta` | in-process: `CacheStorageUtils.getRddOrEmpty(..., CacheRecordType.data, ...)` |
+| `skip_extracted.output_document_content` | `.../tobeprocessed_content` | in-memory (no materialization — documented deviation) |
+| `cache_update.input` | `.../tobeprocessed_content` | the same in-memory RDD |
+| `cache_update.output_root` | `${workingDir}/metadata_extractor/output_root` | `cache_out` |
+| `cache_update.output_report_root_path` | `${workingDir}/report` | `report_root` |
+| `cache_update.excluded_ids` | `${metadataextraction_excluded_checksums}` | `metadataextraction_excluded_checksums` |
+| `cache_create.input` (no cache) | `${workingDir}/preprocessing/output` (all) | empty cache ⇒ nothing filtered |
+| `build-report` | `-I${workingDir}/report -O${workingDir}/report/working_dir/report.json` | `-I .../report -O .../report_builder/report.json` — **deliberate deviation** (see below) |
+
+Deviations are limited to the two listed above plus the absorbed `check_input_isempty` /
+`cache_create`-vs-`cache_update` branching.
+
 ## Not covered by this migration
 
 The following Oozie workflows referenced by the metadata extraction hierarchy are **not** part of
