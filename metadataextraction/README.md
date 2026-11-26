@@ -185,7 +185,7 @@ against intuition about the pipeline order). Re-verify with
 | `import_content_url.mimetypes_wos` | `file::WoS` | `mimetypes_wos` default |
 | `import_content_url.output_name_pdf` / `_xml_pmc` | `pdf` / `xmlpmc` | same |
 | `import_content_url.output_report_root_path` | `${workingDir}/report` | `report_root` |
-| `preprocessing.input` | `${workingDir}/import_content_url/imported/${import_mode}` | `imported_root/import_mode` |
+| `preprocessing.input` | `${workingDir}/import_content_url/imported/${import_mode}` | `imported_root` + the `import_mode` derived from `extraction_mode` (`pdf`│`xmlpmc`) |
 | `preprocessing.output` | `${workingDir}/preprocessing/output` | `preprocessed_out` |
 | `skip_extracted.input_document_content` | `${workingDir}/preprocessing/output` | in-process: `toBeProcessedUrls` derived from `preprocessed_out` |
 | `skip_extracted.input_document_meta` | `${cache_location}/${cache_id}/meta` | in-process: `CacheStorageUtils.getRddOrEmpty(..., CacheRecordType.data, ...)` |
@@ -200,16 +200,78 @@ against intuition about the pipeline order). Re-verify with
 Deviations are limited to the two listed above plus the absorbed `check_input_isempty` /
 `cache_create`-vs-`cache_update` branching.
 
+## Execution modes: `pdf` vs `pmc` (`extraction_mode`)
+
+The Oozie workflows chose the extraction chain with `metadata_extractor_app_name` and then relied on
+a block of `job.properties` overrides for everything else, which had to be uncommented together:
+
+```properties
+#ingestpmc cache related
+#metadata_extractor_app_name=ingest_pmc_metadata
+#import_mode=xmlpmc
+#cache_report_relative_path=import_ingestpmc_cache
+#cache_report_properties_prefix=import.ingestPmc
+#cache_location=/user/dnet.production/iis/cache/ingestpmc
+#max_file_size_mb=2
+```
+
+Keeping those as independent Airflow params let a run end up half-PMC (JATS records in the PDF
+cache, PDF report keys over PMC counters, `xmlpmc` urls fed to Grobid). Instead
+**`extraction_mode` decides everything intrinsic to the mode**, derived in `../extraction_modes.py`
+(the single source of truth for both cache DAGs), while storage locations stay explicit:
+
+| Derived value | `pdf` (default) | `pmc` |
+|---|---|---|
+| content url subdirectory (`preprocessing` input) | `pdf` | `xmlpmc` |
+| content retrieval counters | `import.contents.pdf.*` | `import.contents.jats.*` |
+| cache report path / key prefix | `import_metadataextraction_cache` / `import.metadataExtraction` | `import_ingestpmc_cache` / `import.ingestPmc` |
+| extraction report path / key prefix | `import_metadataextraction` / `import.metadataExtraction` | `import_ingestpmc` / `import.ingestPmc` |
+| `-maxFileSizeMb` | `100` | `2` |
+| chain run by `MetadataExtractionCacheChainJob` | content retrieval → Grobid (`metadata_extractor`) | plaintext import → JATS ingest → schema transformer (`ingest_pmc_metadata`) |
+
+What is **not** derived, and why:
+
+* `cache_location` stays a plain run parameter — and now has **no default**. The two caches are
+  unrelated HDFS locations (`/user/dnet.production/iis/cache/metadataextraction` vs
+  `.../cache/ingestpmc`), not one nested in the other, so deriving one from the other would encode
+  a relation that does not exist. With no default, switching the mode cannot silently reuse the
+  previous mode's cache: an empty value aborts the run in the `validate_params` entry task
+  (`AirflowException` naming both production paths) before any Spark job starts.
+
+So the rule is a single one: **the mode decides identities (parser, counters, report names), the
+run decides storage locations** (`cache_location`, `workingDir`, `input`).
+
+* `pdf` is byte-identical to the pre-PMC behaviour (same report names, report keys and size limit),
+  so an existing PDF cache keeps being reused — pass it as `cache_location` as before.
+* `max_file_size_mb` is the only preset that can still be overridden per run; leave it empty to get
+  the mode default. The 2 MB PMC cap is inherited from Oozie, where the PMC parser was memory
+  hungry.
+* `identify_by_checksum` needs no second switch: extraction is disabled there
+  (`-activeMetadataExtraction=false`), so the mode only selects how the cache report is named — the
+  cache itself is still given explicitly via `cache_location`.
+* PMC runs still need their own `workingDir` (and their own `input` for `identify_by_checksum`).
+* Removed params: `import_mode`, `cache_report_relative_path`, `cache_report_properties_prefix`.
+  A saved run conf that still carries them is ignored, so drop them when re-running an old
+  configuration; `cache_location` keeps its name but must now be filled in explicitly.
+
+Internally `MetadataExtractionCacheChainJob` switches on `-extractionMode` and reuses the existing
+jobs as libraries: `DocumentTextUrlBasedImporterJob` (JATS bytes) → `PmcMetadataIngesterJob`
+(the `ingest/pmc/metadata` MapReduce mapper, incl. its fault contract) →
+`PmcMetadataTransformerJob`. Both paths converge on `ExtractedDocumentMetadata` + `Fault`, so cache
+lookup, cache update and output writing stay shared.
+
 ## Not covered by this migration
 
 The following Oozie workflows referenced by the metadata extraction hierarchy are **not** part of
-this change because they are either PMC/XML specific or unrelated PIG-based phases that are
-handled elsewhere (they are not listed among the workflows requiring porting):
+this change:
 
-* `eu/dnetlib/iis/wf/ingest/pmc/prefetched/oozie_app` and `eu/dnetlib/iis/wf/ingest/pmc/metadata/oozie_app`
-  (PMC/XML metadata ingest; `importer/plaintext` + `ingest/pmc/metadata` +
-  `transformers/ingest/pmc/metadata`) — needed only when `import_mode=xmlpmc`.
 * `eu/dnetlib/iis/wf/transformers/metadataextraction/documenttext/oozie_app`.
+
+The PMC counterparts (`eu/dnetlib/iis/wf/ingest/pmc/prefetched/oozie_app` and
+`eu/dnetlib/iis/wf/ingest/pmc/metadata/oozie_app`, i.e. `importer/plaintext` +
+`ingest/pmc/metadata` + `transformers/ingest/pmc/metadata`) **are** covered: they are folded into
+`MetadataExtractionCacheChainJob` and selected with `extraction_mode=pmc` — see
+[Execution modes](#execution-modes-pdf-vs-pmc-extraction_mode).
 
 ## Parameter conventions
 
@@ -220,7 +282,9 @@ All Spark tasks share the established conventions of this repository:
 * `$UNDEFINED$` is the sentinel for an unbounded/undefined value, matching the Oozie convention.
 * Cache handling relies on `-cacheRootDir` + `-lockManagerFactoryClassName`
   (`HadoopFsLockManagerFactory` requires no external coordination service; use
-  `ZookeeperLockManagerFactory` only for legacy Hadoop HA clusters).
+  `ZookeeperLockManagerFactory` only for legacy Hadoop HA clusters). `cache_location` is a required
+  parameter with **no default**: the PDF and PMC caches are unrelated HDFS locations, so the run has
+  to state which one it means (empty → `validate_params` aborts before any Spark job starts).
 * `sparkExecutorCores` (default `4`) is set explicitly on every DAG in the chain (builder,
   `identify_by_checksum`, `spark_content_url_chain`). The Kubernetes environment runs with 24
   cores per executor, which leaves each concurrent task far too little heap — this caused the
@@ -248,10 +312,10 @@ against. Both `spark.executor.instances` and the CRD's `spec.dynamicAllocation` 
 with a fixed, non-tunable shape (`enabled: false`).
 
 **The guard is applied to `metadataextraction_cached` only** — it is the single task in these DAGs
-that reaches Grobid. `preprocessing`, `importer_content` and the `postprocessing-*` tasks do pure
-HDFS/object-store work, so they keep the environment's default dynamic allocation and are not
-throttled (`spark_extra_conf=spark_conf`); the pinned variant is `grobid_spark_conf` /
-`grobid_dynamic_allocation`.
+that reaches Grobid. `preprocessing`, the content import (embedded in that same job) and the
+`postprocessing-*` tasks do pure HDFS/object-store work, so they keep the environment's default
+dynamic allocation and are not throttled (`spark_extra_conf=spark_conf`); the pinned variant is
+`grobid_spark_conf` / `grobid_dynamic_allocation`.
 
 In `identify_by_checksum` the task runs with `-activeMetadataExtraction false`, so no Grobid calls
 happen there at all and the guard is dormant. It is still attached to that task so that enabling

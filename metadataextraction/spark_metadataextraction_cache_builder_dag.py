@@ -38,6 +38,19 @@ Airflow mapping
         action needs no bespoke shell script)
   * ``finalize`` / ``remove_sideproducts``             → left to cluster housekeeping (working
         directory retention policy); it is intentionally not modelled in Airflow.
+
+Execution modes
+---------------
+  ``extraction_mode=pdf`` (default) extracts PDFs with Grobid/CERMINE, ``extraction_mode=pmc``
+  ingests JATS/PMC XML instead. This is the Airflow replacement for the Oozie
+  ``metadata_extractor_app_name`` selector, which only worked together with the commented block of
+  ``job.properties`` overrides (``import_mode``, report prefixes, ``max_file_size_mb``). Everything
+  intrinsic to the mode is derived from it by ``extraction_modes`` in a single place, so the PDF and
+  PMC chains can not be mixed within one run: the content url subdirectory and every report
+  path/key follow the selected mode.
+
+  The cache location is deliberately *not* part of that set: the PDF and PMC caches are unrelated
+  HDFS locations, so ``cache_location`` is a required parameter with no default.
 """
 
 import os
@@ -47,7 +60,7 @@ from datetime import timedelta
 from airflow.decorators import dag
 from airflow.models.param import Param
 from airflow.providers.standard.operators.empty import EmptyOperator
-from airflow.providers.standard.operators.python import BranchPythonOperator
+from airflow.providers.standard.operators.python import BranchPythonOperator, PythonOperator
 from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 
 package_dir = os.path.dirname(os.path.abspath(__file__))
@@ -58,6 +71,14 @@ for path in (package_dir, parent_dir):
         sys.path.append(path)
 
 from spark_configurator import generate_spark_operator, java_action
+from extraction_modes import (
+    MODE_PARAM,
+    PDF,
+    PMC,
+    mode_or_param,
+    mode_value,
+    validate_required_params,
+)
 
 EXECUTION_TIMEOUT = int(os.getenv("EXECUTION_TIMEOUT", 6))
 
@@ -94,17 +115,17 @@ def _decide_import_content_url(params):
     params={
         # ---------------- artifacts / runtime ----------------
         "JAR_METADATAEXTRACTION": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20261117.152610-24-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20261126.163334-26-uber.jar",
             type="string",
             description="iis-wf-metadataextraction uber JAR (cache chain job incl. metadata extractor)",
         ),
         "JAR_TRANSFORMERS": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-transformers/1.3.0-SNAPSHOT/iis-wf-transformers-1.3.0-20261104.164945-19-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-transformers/1.3.0-SNAPSHOT/iis-wf-transformers-1.3.0-20261126.152523-20-uber.jar",
             type="string",
             description="iis-wf-transformers uber JAR (checksum preprocessing job)",
         ),
         "JAR_IMPORT": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-import/1.3.0-SNAPSHOT/iis-wf-import-1.3.0-20261109.165609-15-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-import/1.3.0-SNAPSHOT/iis-wf-import-1.3.0-20261126.151743-16-uber.jar",
             type="string",
             description="iis-wf-import uber JAR (content url importer + content url chain)",
         ),
@@ -118,10 +139,9 @@ def _decide_import_content_url(params):
         "HADOOP_USER_NAME": Param("marek.horst", type="string"),
 
         # ---------------- import (hive aggregation subsystem) ----------------
-        "import_mode": Param(
-            default="pdf", type="string",
-            description="Import mode selecting the content url chain output subdirectory: pdf│xmlpmc",
-        ),
+        # There is deliberately no ``import_mode`` parameter: the content url subdirectory read by
+        # the preprocessing step is derived from ``extraction_mode`` (pdf → ``pdf``,
+        # pmc → ``xmlpmc``), so the extraction chain and its input can not disagree.
         "input_table_name": Param(default="payload_data.payload", type="string"),
         "hive_metastore_uris": Param(default="thrift://iis-cdh5-test-m3.ocean.icm.edu.pl:9083", type="string"),
         "input_id_mapping": Param(
@@ -137,6 +157,19 @@ def _decide_import_content_url(params):
             description="Identifiers existing in OA+ (eu.dnetlib.iis.common.schemas.Identifier) used "
                         "by the existence filter to drop contents without metadata representatives. "
                         "$UNDEFINED$ → the transformers_common_existencefilter step is skipped.",
+        ),
+        # THE switch that replaces the Oozie ``metadata_extractor_app_name`` selector:
+        # pdf → metadata_extractor (Grobid/CERMINE), pmc → ingest_pmc_metadata (JATS/PMC XML).
+        # Every value intrinsic to the mode (import subdir, report paths/prefixes, max file size) is
+        # derived from it by ``extraction_modes``, so a run can not end up half-PMC. The cache
+        # location is NOT derived: the two caches are unrelated HDFS locations (see below).
+        MODE_PARAM: Param(
+            default=PDF,
+            type="string",
+            enum=[PDF, PMC],
+            description="Extraction mode: pdf (Grobid/CERMINE, default) or pmc (JATS/PMC XML). "
+                        "Selects the whole chain; the derived values are listed in "
+                        "extraction_modes.py.",
         ),
         "mimetypes_pdf": Param(default="pdf,application/pdf", type="string"),
         "mimetypes_html": Param(default="text/html", type="string"),
@@ -177,8 +210,12 @@ def _decide_import_content_url(params):
             default=_UNDEFINED, type="string",
             description="CSV of content checksums excluded from processing",
         ),
-        "max_file_size_mb": Param(default="100", type="string",
-                                  description="Maximum allowed content size in MB"),
+        "max_file_size_mb": Param(
+            default="", type="string",
+            description="Maximum allowed content size in MB. Empty → the extraction_mode preset "
+                        "(100 for pdf, 2 for pmc -- Oozie capped JATS records at 2 MB because the "
+                        "PMC parser is memory hungry).",
+        ),
         "content_connection_timeout": Param(default="60000", type="string"),
         "content_read_timeout": Param(default="60000", type="string"),
         "log_fault_processing_time_threshold_secs": Param(default="60", type="string"),
@@ -208,10 +245,17 @@ def _decide_import_content_url(params):
         ),
 
         # ---------------- cache ----------------
+        # NOT derived from extraction_mode: the PDF and PMC caches are unrelated HDFS locations
+        # (Oozie: /user/dnet.production/iis/cache/metadataextraction vs .../cache/ingestpmc), not
+        # one nested inside the other. It therefore has **no default** -- switching the mode must
+        # not be able to silently reuse the previous mode's cache. Empty aborts the run.
         "cache_location": Param(
-            default="hdfs://nameservice1/tmp/marek.horst/metadataextraction/cache",
+            default="",
             type="string",
-            description="Metadata extraction HDFS cache location",
+            description="REQUIRED. Metadata extraction cache location, chosen per run and "
+                        "independent of extraction_mode. e.g. "
+                        "/user/dnet.production/iis/cache/metadataextraction (pdf) or "
+                        "/user/dnet.production/iis/cache/ingestpmc (pmc).",
         ),
         "lockManagerFactoryClassName": Param(
             default="eu.dnetlib.iis.common.lock.HadoopFsLockManagerFactory", type="string"),
@@ -310,8 +354,34 @@ def metadataextraction_cache_builder():
     report_root      = "{{ params.get('workingDir') }}/report"
 
     # ------------------------------------------------------------------ #
+    # 0. extraction mode preset (derived, never set by hand)              #
+    #                                                                    #
+    # ``extraction_mode`` alone selects the chain: it replaces the Oozie  #
+    # metadata_extractor_app_name selector *and* the commented block of   #
+    # job.properties overrides that had to be uncommented together with   #
+    # it. See extraction_modes.py for the preset table and its sources.   #
+    # ------------------------------------------------------------------ #
+    import_mode                     = mode_value("import_mode")
+    # NOT derived: the run states the cache location (required, no default -- validate_params)
+    cache_location_dir              = "{{ params.get('cache_location') }}"
+    content_report_prefix           = mode_value("content_report_properties_prefix")
+    cache_report_relative_path      = mode_value("cache_report_relative_path")
+    extraction_report_relative_path = mode_value("extraction_report_relative_path")
+    report_prefix                   = mode_value("report_properties_prefix")
+    # run-specific override of the preset (empty param → 100 for pdf, 2 for pmc)
+    max_file_size_mb                = mode_or_param("max_file_size_mb", "max_file_size_mb")
+
+    # ------------------------------------------------------------------ #
     # 1. import_content_url (reusable content url chain DAG)              #
     # ------------------------------------------------------------------ #
+    # cache_location has no default (the PDF and PMC caches are unrelated HDFS locations), so the
+    # run refuses to start rather than silently reading/writing the other mode's cache.
+    validate_params = PythonOperator(
+        task_id="validate_params",
+        task_display_name="Validate required parameters",
+        python_callable=validate_required_params,
+    )
+
     import_content_url = TriggerDagRunOperator(
         task_id="import_content_url",
         task_display_name="Import content urls (spark_content_url_chain)",
@@ -379,7 +449,7 @@ def metadataextraction_cache_builder():
         image="{{ params.get('SPARK_IMAGE') }}",
         main_class="eu.dnetlib.iis.wf.transformers.metadataextraction.checksum.preprocessing.ChecksumPreprocessingJob",
         arguments=[
-            "-input",  imported_root + "/{{ params.get('import_mode') }}",
+            "-input",  imported_root + "/" + import_mode,
             "-output", preprocessed_out,
         ],
         spark_extra_conf=spark_conf,
@@ -405,15 +475,19 @@ def metadataextraction_cache_builder():
             "-outputNameMeta",   "{{ params.get('output_name_meta') }}",
             "-outputNameFault",  "{{ params.get('output_name_fault') }}",
             "-numberOfEmittedFiles", "{{ params.get('numberOfEmittedFiles') }}",
-            "-cacheRootDir",     "{{ params.get('cache_location') }}",
+            "-cacheRootDir",     cache_location_dir,
             "-lockManagerFactoryClassName", "{{ params.get('lockManagerFactoryClassName') }}",
             "-numberOfEmittedFilesInCache", "{{ params.get('numberOfEmittedFilesInCache') }}",
             # content retrieval (in-process, applied to the not-yet-cached subset only)
-            "-maxFileSizeMb",    "{{ params.get('max_file_size_mb') }}",
+            "-maxFileSizeMb",    max_file_size_mb,
             "-contentConnectionTimeout", "{{ params.get('content_connection_timeout') }}",
             "-contentReadTimeout",       "{{ params.get('content_read_timeout') }}",
             "-objectstoreS3Endpoint",    "{{ params.get('objectstore_s3_endpoint') }}",
             "-objectstoreS3KeystoreLocation", "{{ params.get('objectstore_s3_keystore_location') }}",
+            # execution mode: pdf (Grobid) or pmc (JATS ingestion) -- replaces the Oozie
+            # metadata_extractor_app_name selector; the content report prefix follows it
+            "-extractionMode",   "{{ params.get('" + MODE_PARAM + "') }}",
+            "-contentReportPropertiesPrefix", content_report_prefix,
             # builder does not return records already present in the cache
             # boolean options (JCommander arity 0) -- must use the '=' separator, otherwise the
             # flag is consumed on its own and the bare true/false token becomes an unknown
@@ -421,9 +495,9 @@ def metadataextraction_cache_builder():
             "-returnAlreadyExtractedMeta=false",
             "-activeMetadataExtraction=true",
             "-outputReportRootPath",       report_root,
-            "-cacheReportRelativePath",    "import_metadataextraction_cache",
-            "-extractionReportRelativePath", "import_metadataextraction",
-            "-reportPropertiesPrefix",     "import.metadataExtraction",
+            "-cacheReportRelativePath",    cache_report_relative_path,
+            "-extractionReportRelativePath", extraction_report_relative_path,
+            "-reportPropertiesPrefix",     report_prefix,
             "-excludedIds",                "{{ params.get('metadataextraction_excluded_checksums') }}",
             "-logFaultProcessingTimeThresholdSecs",  "{{ params.get('log_fault_processing_time_threshold_secs') }}",
             "-interruptProcessingTimeThresholdSecs", "{{ params.get('interrupt_processing_time_threshold_secs') }}",
@@ -495,6 +569,7 @@ def metadataextraction_cache_builder():
     # ------------------------------------------------------------------ #
     # Wiring                                                             #
     # ------------------------------------------------------------------ #
+    validate_params >> decide_import_content_url
     decide_import_content_url >> [import_content_url, skip_import_content_url]
     [import_content_url, skip_import_content_url] >> content_urls_ready
     content_urls_ready >> preprocessing >> metadataextraction_cached

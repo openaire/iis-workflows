@@ -26,6 +26,15 @@ Airflow mapping
           ``prefetched`` sub-workflow (importer_content + core) has no counterpart here.
   * ``postprocessing-meta`` (PIG, already ported)      → ``ChecksumMetaPostprocessingJob``
   * ``postprocessing-fault`` (PIG, already ported)     → ``ChecksumFaultPostprocessingJob``
+
+Execution modes
+---------------
+  ``extraction_mode`` selects which cache this workflow reads: the PDF cache (``pdf``, default) or
+  the PMC/JATS one (``pmc``). Extraction is disabled here, so the mode does not change what the
+  job computes -- it changes *where* it looks and *how the cache report is named*, exactly like the
+  ``job.properties`` override block of the Oozie app (that app already ran PMC by default). The
+  mode-intrinsic values (cache report path/key prefix) are derived by ``extraction_modes``, while
+  the cache location itself is given per run: the PDF and PMC caches are unrelated HDFS locations.
 """
 
 import os
@@ -35,6 +44,7 @@ from datetime import timedelta
 from airflow.decorators import dag
 from airflow.models.param import Param
 from airflow.providers.standard.operators.empty import EmptyOperator
+from airflow.providers.standard.operators.python import PythonOperator
 
 package_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(package_dir)
@@ -44,6 +54,7 @@ for path in (package_dir, parent_dir):
         sys.path.append(path)
 
 from spark_configurator import generate_spark_operator
+from extraction_modes import MODE_PARAM, PDF, PMC, mode_value, validate_required_params
 
 EXECUTION_TIMEOUT = int(os.getenv("EXECUTION_TIMEOUT", 6))
 
@@ -63,12 +74,12 @@ _UNDEFINED = "$UNDEFINED$"
     params={
         # ---------------- artifacts / runtime ----------------
         "JAR_METADATAEXTRACTION": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20261117.152610-24-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-metadataextraction/1.3.0-SNAPSHOT/iis-wf-metadataextraction-1.3.0-20261126.163334-26-uber.jar",
             type="string",
             description="iis-wf-metadataextraction uber JAR (cache chain job incl. metadata extractor)",
         ),
         "JAR_TRANSFORMERS": Param(
-            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-transformers/1.3.0-SNAPSHOT/iis-wf-transformers-1.3.0-20261104.164945-19-uber.jar",
+            default="https://maven.ceon.pl/artifactory/iis-snapshots/eu/dnetlib/iis/iis-wf-transformers/1.3.0-SNAPSHOT/iis-wf-transformers-1.3.0-20261126.152523-20-uber.jar",
             type="string",
             description="iis-wf-transformers uber JAR (checksum preprocessing/postprocessing jobs)",
         ),
@@ -80,7 +91,9 @@ _UNDEFINED = "$UNDEFINED$"
         "input": Param(
             default="hdfs://nameservice1/tmp/marek.horst/metadataextraction/cache_builder/import_content_url/imported/pdf",
             type="string",
-            description="Input DocumentContentUrl datastore",
+            description="Input DocumentContentUrl datastore. PMC runs are fed from the ``xmlpmc`` "
+                        "subdirectory the content url chain produces (the Oozie app had it "
+                        "hardcoded to .../imported/xmlpmc).",
         ),
         "output_root": Param(
             default="hdfs://nameservice1/tmp/marek.horst/metadataextraction/identify_by_checksum/out",
@@ -108,10 +121,25 @@ _UNDEFINED = "$UNDEFINED$"
         "interrupt_processing_time_threshold_secs": Param(default="120", type="string"),
 
         # ---------------- cache ----------------
-        "cache_location": Param(
-            default="hdfs://nameservice1/tmp/marek.horst/metadataextraction/cache",
+        # Which cache is read is the only thing the mode changes in this workflow (extraction is
+        # disabled); it replaces the Oozie ``metadata_extractor_app_name`` + job.properties
+        # override pair and drives the cache location and cache report names below.
+        MODE_PARAM: Param(
+            default=PDF,
             type="string",
-            description="Metadata extraction HDFS cache location",
+            enum=[PDF, PMC],
+            description="Cache to read: pdf (Grobid/CERMINE produced cache, default) or pmc "
+                        "(JATS/PMC cache).",
+        ),
+        # NOT derived from extraction_mode: the caches are unrelated HDFS locations, so the run
+        # states which one to read. No default -- empty aborts the run (validate_params) instead
+        # of silently reading the other mode's cache.
+        "cache_location": Param(
+            default="",
+            type="string",
+            description="REQUIRED. Cache location to read, independent of extraction_mode. e.g. "
+                        "/user/dnet.production/iis/cache/metadataextraction (pdf) or "
+                        "/user/dnet.production/iis/cache/ingestpmc (pmc).",
         ),
         "lockManagerFactoryClassName": Param(
             default="eu.dnetlib.iis.common.lock.HadoopFsLockManagerFactory",
@@ -129,8 +157,9 @@ _UNDEFINED = "$UNDEFINED$"
             default="hdfs://nameservice1/tmp/marek.horst/metadataextraction/identify_by_checksum/report", type="string",
             description="Base directory for partial reports. Empty → {workingDir}/report",
         ),
-        "cache_report_relative_path": Param(default="import_metadataextraction_cache", type="string"),
-        "cache_report_properties_prefix": Param(default="import.metadataExtraction", type="string"),
+        # NOTE: the cache report path and key prefix are derived from extraction_mode
+        # (import_metadataextraction_cache / import.metadataExtraction for pdf,
+        # import_ingestpmc_cache / import.ingestPmc for pmc) -- see extraction_modes.py.
 
         # ---------------- spark tuning ----------------
         "sparkDriverMemory": Param(
@@ -187,9 +216,25 @@ def metadataextraction_cache_identify_by_checksum():
     preprocessed = "{{ params.get('workingDir') }}/preprocessing/output"
     cache_out = "{{ params.get('workingDir') }}/metadataextraction_cached/out"
 
+    # extraction mode preset: the mode alone decides which cache is read and how its report is
+    # named (extraction itself is disabled in this workflow)
+    # NOT derived: the run states the cache location (required, no default -- validate_params)
+    cache_location_dir              = "{{ params.get('cache_location') }}"
+    cache_report_relative_path      = mode_value("cache_report_relative_path")
+    extraction_report_relative_path = mode_value("extraction_report_relative_path")
+    report_prefix                   = mode_value("report_properties_prefix")
+
     # ------------------------------------------------------------------ #
     # 1. preprocessing (id → contentChecksum)                            #
     # ------------------------------------------------------------------ #
+    # cache_location has no default (the PDF and PMC caches are unrelated HDFS locations), so the
+    # run refuses to start rather than silently reading the other mode's cache.
+    validate_params = PythonOperator(
+        task_id="validate_params",
+        task_display_name="Validate required parameters",
+        python_callable=validate_required_params,
+    )
+
     preprocessing = generate_spark_operator(
         task_id="preprocessing",
         task_display_name="Replace id with content checksum (ChecksumPreprocessingJob)",
@@ -223,7 +268,7 @@ def metadataextraction_cache_identify_by_checksum():
             "-outputNameMeta",   "{{ params.get('output_name_meta') }}",
             "-outputNameFault",  "{{ params.get('output_name_fault') }}",
             "-numberOfEmittedFiles", "{{ params.get('numberOfEmittedFiles') }}",
-            "-cacheRootDir",     "{{ params.get('cache_location') }}",
+            "-cacheRootDir",     cache_location_dir,
             "-lockManagerFactoryClassName", "{{ params.get('lockManagerFactoryClassName') }}",
             "-numberOfEmittedFilesInCache", "{{ params.get('numberOfEmittedFilesInCache') }}",
             # identify_by_checksum chain: return records already present in the cache
@@ -233,9 +278,9 @@ def metadataextraction_cache_identify_by_checksum():
             "-returnAlreadyExtractedMeta=true",
             "-activeMetadataExtraction=false",
             "-outputReportRootPath",       report_root,
-            "-cacheReportRelativePath",    "{{ params.get('cache_report_relative_path') }}",
-            "-extractionReportRelativePath", "import_metadataextraction",
-            "-reportPropertiesPrefix",     "{{ params.get('cache_report_properties_prefix') }}",
+            "-cacheReportRelativePath",    cache_report_relative_path,
+            "-extractionReportRelativePath", extraction_report_relative_path,
+            "-reportPropertiesPrefix",     report_prefix,
             "-excludedIds",                "{{ params.get('excluded_ids') }}",
             "-logFaultProcessingTimeThresholdSecs",      "{{ params.get('log_fault_processing_time_threshold_secs') }}",
             "-interruptProcessingTimeThresholdSecs",     "{{ params.get('interrupt_processing_time_threshold_secs') }}",
@@ -286,6 +331,7 @@ def metadataextraction_cache_identify_by_checksum():
     # ------------------------------------------------------------------ #
     # Wiring                                                             #
     # ------------------------------------------------------------------ #
+    validate_params >> preprocessing
     preprocessing >> metadataextraction_cached
     metadataextraction_cached >> [postprocessing_meta, postprocessing_fault]
     [postprocessing_meta, postprocessing_fault] >> end
